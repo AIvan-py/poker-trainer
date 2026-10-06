@@ -14,6 +14,7 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (n) => n.toLocaleString('ru-RU');
 const cap = (s) => s[0].toUpperCase() + s.slice(1);
+const isF = (id) => !!meta[id]?.f;
 
 const store = {
   get(k, d) {
@@ -26,9 +27,9 @@ const store = {
 
 const BOTS = [
   { name: 'Борис', style: 'fish', color: '#5aa9c9' },
-  { name: 'Лена', style: 'pro', color: '#c9a35b' },
+  { name: 'Лена', style: 'pro', color: '#c9a35b', f: true },
   { name: 'Гоша', style: 'maniac', color: '#e0664d' },
-  { name: 'Нина', style: 'rock', color: '#a3aab0' },
+  { name: 'Нина', style: 'rock', color: '#a3aab0', f: true },
   { name: 'Петя', style: 'student', color: '#93c463' },
 ];
 const OPP_HINT = {
@@ -38,9 +39,9 @@ const OPP_HINT = {
 };
 // Места по часовой стрелке от игрока (внизу): [x%, y%]
 const LAYOUTS = {
-  2: [[50, 91], [50, 13]],
-  4: [[50, 91], [13, 31], [50, 13], [87, 31]],
-  6: [[50, 91], [12, 72], [12, 33], [50, 13], [88, 33], [88, 72]],
+  2: [[50, 87], [50, 13]],
+  4: [[50, 87], [13, 33], [50, 13], [87, 33]],
+  6: [[50, 87], [12, 72], [12, 33], [50, 13], [88, 33], [88, 72]],
 };
 
 const settings = Object.assign({ opponents: 3, hintMode: 'auto', speed: 'normal', fourColor: false, comboBoost: false }, store.get('settings', {}));
@@ -75,6 +76,7 @@ function showScreen(name) {
 function openSheet(id) {
   if (id === 'combos') renderCombos();
   if (id === 'log') renderLog();
+  if (id === 'explain' && !renderExplain()) return;
   $(`#${id}`).hidden = false;
   $(`#${id}-backdrop`).hidden = false;
 }
@@ -113,6 +115,8 @@ function startTable() {
 }
 
 function newHand() {
+  // новая раздача — только когда текущая закончилась (защита от двойного нажатия)
+  if (game.phase !== 'done' && game.phase !== 'idle') return;
   clearTimeout(ui.timer);
   game.startHand();
   Object.assign(ui, {
@@ -145,9 +149,11 @@ function loop() {
     if (p.isHuman) {
       ui.advice = advise(game, 0);
       ui.asked = false;
-      ui.open = false;
+      // защита от двойного касания: кнопки оживают не сразу после появления
+      ui.actReadyAt = performance.now() + 450;
       const L = game.legal(0);
-      ui.raiseTo = ui.advice.type === 'raise' ? ui.advice.amount : presets(L)[0]?.amount ?? L.minTo;
+      const coachSize = settings.hintMode === 'auto' && ui.advice.type === 'raise';
+      ui.raiseTo = coachSize ? ui.advice.amount : presets(L)[0]?.amount ?? L.minTo;
       render();
       return;
     }
@@ -156,7 +162,8 @@ function loop() {
     render();
     ui.timer = setTimeout(() => {
       const d = decide(game, idx, STYLES[p.style], Math.random, 700);
-      if (d.type === 'fold' && !game.players[0].folded) ui.whatIf = snapshot('bot', [idx]);
+      // «что было бы» для соперника — только когда его фолд завершил раздачу один на один
+      if (d.type === 'fold' && !game.players[0].folded && game.live().length === 2) ui.whatIf = snapshot('bot', [idx]);
       game.act(idx, d);
       loop();
     }, delay);
@@ -175,6 +182,7 @@ function loop() {
 
 function humanAct(type) {
   if (!game || game.phase !== 'betting' || game.toAct !== 0) return;
+  if (performance.now() < (ui.actReadyAt ?? 0)) return;
   const L = game.legal(0);
   const amount = type === 'raise' ? ui.raiseTo : undefined;
   const shownType = type === 'call' && L.toCall === 0 ? 'check' : type;
@@ -195,6 +203,7 @@ function humanAct(type) {
     ui.whatIf = snapshot('me', opps, ui.advice?.info?.eq);
   }
   ui.advice = null;
+  closeSheet('explain');
   game.act(0, { type, amount });
   loop();
 }
@@ -209,19 +218,24 @@ function snapshot(by, oppIds, coachEq) {
     street: game.street,
     board: game.board.slice(),
     runout: game.runoutBoard(),
-    eq: equityKnown(me.hole, oppHoles, game.board, 20000),
+    hole: me.hole.slice(),
+    oppHoles,
+    eq: null, // считаем лениво — только когда показываем итог
     coachEq,
   };
 }
 
 function whatIfHTML(w) {
   const me = game.players[0];
+  if (w.eq === null) w.eq = equityKnown(w.hole, w.oppHoles, w.board, 10000);
   const scores = [{ id: 0, score: evaluate(me.hole.concat(w.runout)) },
     ...w.oppIds.map((id) => ({ id, score: evaluate(game.players[id].hole.concat(w.runout)) }))];
   const best = Math.max(...scores.map((x) => x.score));
   const winners = scores.filter((x) => x.score === best).map((x) => x.id);
   const meWins = winners.includes(0);
-  const verdict = meWins ? (winners.length > 1 ? 'ты бы разделил банк' : 'ты бы выиграл') : `выиграл бы ${winners.map((id) => game.players[id].name).join(' и ')}`;
+  const others = winners.filter((id) => id !== 0);
+  const verb = others.length > 1 ? 'выиграли бы' : isF(others[0]) ? 'выиграла бы' : 'выиграл бы';
+  const verdict = meWins ? (winners.length > 1 ? 'ты бы разделил банк' : 'ты бы выиграл') : `${verb} ${others.map((id) => game.players[id].name).join(' и ')}`;
   const eq = Math.round(w.eq * 100);
   const where = STREET_NAMES[w.street].toLowerCase();
   let head, lesson;
@@ -234,8 +248,9 @@ function whatIfHTML(w) {
         : `Зная карты соперников, твой шанс был всего ${eq}% — фолд правильный${meWins ? ', даже если в этот раз повезло бы' : ''}.`;
   } else {
     const opp = game.players[w.oppIds[0]].name;
-    head = `${opp} сбросил. Если бы он доиграл до конца, ${verdict}.`;
-    lesson = `Твой шанс против его карт в тот момент: ${eq}%.`;
+    const f = isF(w.oppIds[0]);
+    head = `${opp} ${f ? 'сбросила' : 'сбросил'}. Если бы ${f ? 'она доиграла' : 'он доиграл'} до конца, ${verdict}.`;
+    lesson = `Твой шанс против ${f ? 'её' : 'его'} карт в тот момент: ${eq}%.`;
   }
   const coach = w.coachEq !== undefined ? ` Тренер, не видя чужих карт, оценивал ${Math.round(w.coachEq * 100)}%.` : '';
   const rows = scores.map((x) => {
@@ -326,7 +341,7 @@ function renderSeats() {
     const st = meta[i].style ? STYLES[meta[i].style] : null;
     const a = p.lastAction;
     const bubbleCls = a ? (a.type === 'fold' ? 'fold' : a.type === 'raise' ? 'raise' : '') : '';
-    const below = y < 20 ? 'style="top:auto;bottom:-24px;transform:translate(-50%,100%)"' : '';
+    const below = y < 20 ? 'style="top:50%;left:calc(100% + 6px);transform:translateY(-50%)"' : '';
     const showBubble = a && !done && a.type !== 'blind';
     const stackText = p.allIn && !done ? 'олл-ин' : fmt(p.stack);
     html += `<div class="${cls.join(' ')}" style="left:${x}%;top:${y}%" data-seat="${i}">
@@ -336,19 +351,20 @@ function renderSeats() {
         <span class="plate-text"><b>${esc(p.name)}</b><small>${stackText}</small></span>
         ${showBubble ? `<span class="bubble ${bubbleCls}" ${below}>${esc(a.text)}</span>` : ''}
         ${done && winners.has(i) && game.result.winnings[i] ? `<span class="bubble raise" ${below}>+${fmt(game.result.winnings[i])}</span>` : ''}
+        ${i === game.dealer ? `<span class="dealer${x > 70 ? ' inner' : ''}" title="Баттон (дилер)">D</span>` : ''}
       </div>
+      ${p.bet > 0 && !done ? `<span class="bet bet-${betSide(x, y)}"><span class="chip"></span>${fmt(p.bet)}</span>` : ''}
       <span class="pos-tag">${game.position(i)}${st ? ` · ${st.label.toLowerCase()}` : ''}</span>
     </div>`;
-    if (p.bet > 0 && !done) {
-      const bx = x + (50 - x) * 0.42, by = y + (50 - y) * 0.42;
-      html += `<div class="bet" style="left:${bx}%;top:${by}%"><span class="chip"></span>${fmt(p.bet)}</div>`;
-    }
-    if (i === game.dealer) {
-      const dx = x + (50 - x) * 0.3 + (x === 50 ? 15 : 0), dy = y + (50 - y) * 0.3 + (x === 50 ? 0 : -6);
-      html += `<div class="dealer" style="left:${dx}%;top:${dy}%" title="Баттон (дилер)">D</div>`;
-    }
   });
   $('#seats').innerHTML = html;
+}
+
+/** С какой стороны таблички показывать ставку — всегда в сторону центра стола. */
+function betSide(x, y) {
+  if (x < 30) return 'right';
+  if (x > 70) return 'left';
+  return y < 50 ? 'below' : 'above';
 }
 
 function renderCenter() {
@@ -403,12 +419,11 @@ function renderHero() {
   $('#hero').innerHTML = `
     <div class="hero-cards">${cards}</div>
     <div class="hero-text">
-      <span class="label">${me.folded ? 'Ты сбросил карты' : combo.size ? 'Твоя комбинация (подсвечена)' : 'Твоя рука'}${game.rigged ? ' · подкручено' : ''}</span>
+      <span class="label">${me.folded ? 'Ты сбросил карты' : combo.size ? 'Комбинация' : 'Твоя рука'}${game.rigged ? ' · подкручено' : ''}</span>
       <span class="hero-hand">${esc(name)}</span>
       <span class="hero-meta">
         ${extra ? `<span>${esc(extra)}</span>` : ''}
         <span class="tag" title="${esc(POSITION_INFO[pos].note)}">${pos} · ${POSITION_INFO[pos].name}</span>
-        <span>стек ${fmt(me.stack)}${done ? '' : me.total ? ` · в банке ${fmt(me.total)}` : ''}</span>
       </span>
     </div>`;
 }
@@ -416,6 +431,16 @@ function renderHero() {
 function gradeChip(g) {
   const word = g.grade === 'good' ? 'Хорошо' : g.grade === 'ok' ? 'Допустимо' : 'Ошибка';
   return `<span class="grade ${g.grade}">${word}</span>`;
+}
+
+function renderExplain() {
+  const adv = ui.advice;
+  if (!adv) return false;
+  $('#explain').innerHTML = `<div class="sheet-head"><h2>Тренер: ${esc(adv.label.toLowerCase())}</h2>
+      <button type="button" class="icon-btn" data-close="explain" aria-label="Закрыть">✕</button></div>
+    <ul class="coach-lines">${adv.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>
+    <button type="button" class="btn-primary" data-close="explain">Понятно</button>`;
+  return true;
 }
 
 function renderCoach() {
@@ -431,9 +456,8 @@ function renderCoach() {
       <div class="coach-row">
         <span class="coach-who">Тренер</span>
         <span class="coach-main">Советую: ${esc(adv.label.toLowerCase())}</span>
-        <button type="button" class="link-btn" id="why" aria-expanded="${ui.open}">${ui.open ? 'Скрыть' : 'Почему?'}</button>
+        <button type="button" class="link-btn" id="why">Почему?</button>
       </div>
-      ${ui.open ? `<ul class="coach-lines">${adv.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}
     </div>`;
     return;
   }
@@ -507,6 +531,7 @@ function recordHand() {
 
 function showResult() {
   const r = game.result;
+  if (!r || game.phase !== 'done') return;
   const me = game.players[0];
   const net = me.stack - ui.handStart;
   const total = Object.values(r.winnings).reduce((a, b) => a + b, 0);
@@ -514,7 +539,7 @@ function showResult() {
   const names = winnerIds.map((id) => (id === 0 ? 'ты' : game.players[id].name));
   let title;
   if (r.winnings[0] && winnerIds.length === 1) title = `Ты выиграл банк ${fmt(total)}`;
-  else if (r.winnings[0]) title = `Банк делится: ${names.join(', ')}`;
+  else if (r.winnings[0]) title = `Ты забираешь ${fmt(r.winnings[0])} из ${fmt(total)}`;
   else title = `Банк ${fmt(total)} забирает ${names.join(', ')}`;
   const sub = r.showdown
     ? `Вскрытие. Итог для тебя: ${net > 0 ? '+' : ''}${fmt(net)}`
@@ -669,8 +694,12 @@ document.addEventListener('click', (e) => {
     case 'btn-play': return game ? (showScreen('table'), resume()) : startTable();
     case 'btn-leave': clearTimeout(ui.timer); return showScreen('home');
     case 'btn-log': return openSheet('log');
-    case 'why': ui.open = !ui.open; return renderCoach();
-    case 'ask': ui.asked = true; ui.open = true; renderCoach(); return renderActions();
+    case 'why': return openSheet('explain');
+    case 'ask':
+      ui.asked = true;
+      if (ui.advice?.type === 'raise') ui.raiseTo = ui.advice.amount;
+      renderCoach(); renderActions();
+      return openSheet('explain');
     case 'next-hand': return newHand();
     case 'reveal': ui.revealAll = true; renderSeats(); return showResult();
     case 'reset-stats':
@@ -680,7 +709,7 @@ document.addEventListener('click', (e) => {
     default:
   }
 });
-for (const id of ['combos', 'log']) $(`#${id}-backdrop`).addEventListener('click', () => closeSheet(id));
+for (const id of ['combos', 'log', 'explain']) $(`#${id}-backdrop`).addEventListener('click', () => closeSheet(id));
 $('#opt-4color').addEventListener('change', (e) => { settings.fourColor = e.target.checked; saveSettings(); });
 $('#opt-combo').addEventListener('change', (e) => { settings.comboBoost = e.target.checked; saveSettings(); });
 
@@ -697,3 +726,6 @@ try {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 } catch { /* в песочнице service worker недоступен */ }
+
+// Отладка: доступ к состоянию из консоли только при локальном запуске.
+if (location.hostname === 'localhost') window.__kt = { get game() { return game; }, ui, settings };

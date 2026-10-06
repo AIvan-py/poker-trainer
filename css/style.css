@@ -31,6 +31,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { height: 100%; }
 body {
   margin: 0;
@@ -40,7 +41,7 @@ body {
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
 }
-button { font: inherit; color: inherit; cursor: pointer; }
+button { font: inherit; color: inherit; cursor: pointer; touch-action: manipulation; }
 button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
 #app { height: 100%; }
 .screen { height: 100%; }
@@ -151,7 +152,8 @@ h1 {
   font-size: 13px; font-weight: 500;
 }
 
-.table-wrap { position: relative; flex: 1 1 auto; min-height: 270px; margin: 4px 10px 0; }
+.topbar, .hero, .coach, .actions { flex: none; }
+.table-wrap { position: relative; flex: 1 1 auto; min-height: 210px; margin: 4px 10px 0; }
 .felt {
   position: absolute; inset: 7% 9% 6%;
   border-radius: 999px;
@@ -233,13 +235,18 @@ h1 {
 .bubble.fold { background: #5d625f; color: var(--text); }
 .bubble.raise { background: var(--brass); }
 .bet {
-  position: absolute; transform: translate(-50%, -50%); z-index: 1;
+  position: absolute; z-index: 1; white-space: nowrap;
   display: flex; align-items: center; gap: 4px;
   font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
   background: rgba(0, 0, 0, 0.45); border-radius: 10px; padding: 1px 7px 1px 2px;
 }
+.dealer.inner { right: auto; left: -6px; }
+.bet-right { left: calc(100% + 4px); bottom: 24px; }
+.bet-left { right: calc(100% + 4px); bottom: 24px; }
+.bet-below { top: calc(100% + 4px); left: 50%; transform: translateX(-50%); }
+.bet-above { bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); }
 .dealer {
-  position: absolute; transform: translate(-50%, -50%); z-index: 2;
+  position: absolute; top: -8px; right: -6px; z-index: 2;
   width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
   background: var(--ivory); color: var(--ink); font: 800 11px var(--f-card);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
@@ -268,7 +275,7 @@ h1 {
 .coach-main { flex: 1; min-width: 0; font-weight: 600; }
 .coach-main.muted { color: var(--muted); font-weight: 400; }
 .link-btn { background: none; border: 0; color: var(--brass); font-size: 13px; font-weight: 600; padding: 4px 0; flex: none; }
-.coach-lines { margin: 8px 0 2px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; font-size: 13.5px; color: #cfd6cf; }
+.coach-lines { margin: 12px 0 16px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; font-size: 13.5px; color: #cfd6cf; }
 .coach-lines li { padding-left: 14px; position: relative; }
 .coach-lines li::before { content: ''; position: absolute; left: 2px; top: 0.6em; width: 5px; height: 5px; border-radius: 50%; background: var(--brass-soft); }
 .coach-ask { width: 100%; min-height: 44px; border-radius: 12px; border: 1px dashed var(--brass-soft); background: transparent; color: var(--brass); font-weight: 600; }
@@ -276,7 +283,12 @@ h1 {
 .grade.good { background: var(--good); }
 .grade.ok { background: var(--warn); }
 .grade.bad { background: var(--bad); }
-.fb-text { font-size: 13.5px; color: #cfd6cf; margin-top: 4px; }
+.fb-text {
+  font-size: 13.5px; color: #cfd6cf; margin-top: 4px;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.explain .coach-lines { font-size: 15px; gap: 10px; color: var(--text); }
+.explain .btn-primary { width: 100%; }
 
 /* Кнопки действий */
 .actions { padding: 8px var(--gutter) calc(10px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 8px; }

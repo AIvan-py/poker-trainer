@@ -87,6 +87,10 @@ export function advise(game, idx) {
         lines.push('Был рейз и ре-рейз — здесь продолжают только с самыми сильными руками (примерно QQ+, AK). Твоя подходит.');
         why = 'После ре-рейза играют только топ-руки — у тебя такая.';
         break;
+      case 'price':
+        lines.push(`Доплатить нужно всего ${info.toCall}, а в банке ${info.pot}. Колл окупается, если выигрываешь чаще ${pc(info.potOdds)}% раз, а шанс твоей руки против его диапазона ≈ ${pc(info.eq)}%.`);
+        why = 'Колл дешёвый относительно банка — шансов хватает.';
+        break;
       case 'fold-3bet':
         lines.push('Был рейз и ре-рейз — продолжают только с самыми сильными руками (примерно QQ+, AK). Сбрасывай.');
         why = 'После ре-рейза эта рука слишком слабая.';
@@ -126,7 +130,9 @@ export function advise(game, idx) {
         why = 'Очень сильная рука — повышаем.';
         break;
       case 'odds-ok':
-        lines.push(`${pc(info.eq)}% больше нужных ${pc(info.potOdds)}% — колл выгоден на дистанции.${info.strongDraw ? ' С дро ещё можно выиграть больше, если соберёшь руку.' : ''}`);
+        lines.push(info.eq >= info.potOdds
+          ? `${pc(info.eq)}% больше нужных ${pc(info.potOdds)}% — колл выгоден на дистанции.`
+          : `${pc(info.eq)}% чуть меньше нужных ${pc(info.potOdds)}%, но у тебя сильное дро: если соберёшь руку, соперник часто заплатит ещё — колл допустим.`);
         why = 'Шанс выиграть выше пот-оддсов — колл окупается.';
         break;
       case 'odds-bad':
@@ -158,6 +164,9 @@ export function grade(advice, taken) {
 
   if (info.street === 0) {
     const pct = info.pct;
+    if (info.reason === 'price' && type === 'fold') {
+      return { grade: 'bad', title: 'Ошибка', text: `Колл стоил всего ${info.toCall} при банке ${info.pot}: нужно было выигрывать чаще ${pc(info.potOdds)}%, а шанс был ≈${pc(info.eq)}%. ${better}` };
+    }
     const cont = info.cont ?? 0.2;
     if (rec === 'fold' || rec === 'check') {
       if (type === 'raise' && rec === 'check') return { grade: 'ok', title: 'Допустимо', text: `Можно, но рука не такая сильная, чтобы раздувать банк. ${better}` };

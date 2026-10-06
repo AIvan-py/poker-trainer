@@ -45,7 +45,8 @@ function preflop(game, idx, style, rng, L) {
   const raises = game.raiseCount;
   const facing = game.currentBet;
   const hu = game.n === 2;
-  const info = { street: 0, pct, pos, raises, limpers: game.limpers, facing, toCall: L.toCall, pot: game.pot() };
+  const pot = game.winnablePot(idx);
+  const info = { street: 0, pct, pos, raises, limpers: game.limpers, facing, toCall: L.toCall, pot };
   let type = 'fold', amount = 0, reason;
 
   if (raises === 0) {
@@ -87,6 +88,20 @@ function preflop(game, idx, style, rng, L) {
     else { type = 'fold'; reason = 'fold-3bet'; }
   }
 
+  // Цена: против олл-ина или при очень дешёвом колле считаем шансы честно.
+  if (type === 'fold' && L.toCall > 0) {
+    const potOdds = L.toCall / (pot + L.toCall);
+    const shoved = game.live().some((q) => q.id !== idx && q.allIn && q.bet >= facing);
+    if (shoved || potOdds <= 0.2) {
+      const opps = game.live().filter((q) => q.id !== idx);
+      const eq = equity(p.hole, [], opps.map((q) => q.read), 600, rng);
+      if (eq >= potOdds + 0.04 - style.callMargin) {
+        type = 'call'; reason = 'price';
+        Object.assign(info, { eq, potOdds, n: opps.length });
+      }
+    }
+  }
+
   // характер: агрессивные боты иногда повышают «просто так»
   if (type !== 'raise' && L.canRaise && raises < 2 && pct < 0.65 && rng() < style.bluff * 0.25) {
     type = 'raise';
@@ -103,7 +118,7 @@ function postflop(game, idx, style, rng, L, iters) {
   const n = opps.length;
   const eq = equity(p.hole, game.board, opps.map((q) => q.read), iters, rng);
   const a = analyze(p.hole, game.board);
-  const pot = game.pot();
+  const pot = game.winnablePot(idx);
   const toCall = L.toCall;
   const potOdds = toCall > 0 ? toCall / (pot + toCall) : 0;
   const valueThr = 0.6 * Math.sqrt(2 / (n + 1)) - (style.aggr - 0.5) * 0.08;

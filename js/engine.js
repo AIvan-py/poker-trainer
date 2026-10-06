@@ -23,6 +23,7 @@ export class Game {
       folded: false,
       allIn: false,
       acted: false,
+      noReraise: false,
       lastAction: null,
       read: { pct: 1, aggr: 0, calls: 0 },
     }));
@@ -36,9 +37,17 @@ export class Game {
   live() { return this.players.filter((p) => !p.folded); }
   pot() { return this.players.reduce((s, p) => s + p.total, 0); }
 
+  /** Банк, который игрок реально может выиграть, если уравняет (без чужих фишек сверх его стека). */
+  winnablePot(i) {
+    const me = this.players[i];
+    const cap = me.total + Math.min(this.currentBet - me.bet, me.stack);
+    return this.players.reduce((s, p) => s + (p === me ? p.total : Math.min(p.total, cap)), 0);
+  }
+
   emit(ev) { this.log.push({ street: this.street, ...ev }); }
 
   startHand() {
+    if (this.phase === 'betting' || this.phase === 'runout') throw new Error('Раздача ещё не закончена');
     this.handNo++;
     this.rebought = [];
     for (const p of this.players) {
@@ -59,7 +68,7 @@ export class Game {
     this.lastAggressor = null;
     for (const p of this.players) {
       Object.assign(p, {
-        hole: [], bet: 0, total: 0, folded: false, allIn: false, acted: false, lastAction: null,
+        hole: [], bet: 0, total: 0, folded: false, allIn: false, acted: false, noReraise: false, lastAction: null,
         read: { pct: 1, aggr: 0, calls: 0 },
       });
     }
@@ -135,7 +144,8 @@ export class Game {
     const toCall = Math.min(this.currentBet - p.bet, p.stack);
     const maxTo = p.bet + p.stack;
     const othersCanAct = this.live().some((q) => q.id !== i && !q.allIn);
-    const canRaise = maxTo > this.currentBet && othersCanAct;
+    // неполный олл-ин-рейз не открывает торговлю заново для тех, кто уже ходил
+    const canRaise = maxTo > this.currentBet && othersCanAct && !p.noReraise;
     const minTo = Math.min(this.currentBet + this.minRaise, maxTo);
     return { toCall, canCheck: toCall === 0, canRaise, minTo, maxTo, stack: p.stack, currentBet: this.currentBet };
   }
@@ -167,11 +177,17 @@ export class Game {
       const raiseTo = Math.max(L.minTo, Math.min(Math.round(action.amount ?? L.minTo), L.maxTo));
       const wasBet = this.currentBet === 0;
       const inc = raiseTo - this.currentBet;
+      const full = inc >= this.minRaise || wasBet;
       this.put(p, raiseTo - p.bet);
       if (inc >= this.minRaise) this.minRaise = inc;
       if (raiseTo > this.currentBet) {
         this.currentBet = raiseTo;
-        for (const q of this.players) if (q !== p) q.acted = false;
+        for (const q of this.players) {
+          if (q === p) continue;
+          if (full) q.noReraise = false;
+          else if (q.acted) q.noReraise = true;
+          q.acted = false;
+        }
       }
       this.updateRead(p, 'raise');
       this.raiseCount++;
@@ -248,6 +264,7 @@ export class Game {
     for (const p of this.players) {
       p.bet = 0;
       p.acted = false;
+      p.noReraise = false;
       if (!p.folded && !p.allIn) p.lastAction = null;
     }
     this.currentBet = 0;

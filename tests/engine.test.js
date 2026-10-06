@@ -118,3 +118,32 @@ test('эквити с известными картами', () => {
   const eq = equityKnown(g.players[0].hole, [g.players[1].hole], [], 20000);
   assert.ok(eq > 0 && eq < 1);
 });
+
+test('неполный олл-ин-рейз не даёт повторно повысить тем, кто уже ходил', () => {
+  const g = mk(3, 11);
+  g.startHand();
+  const btn = g.dealer, sb = g.sbIdx, bb = g.bbIdx;
+  g.players[sb].stack = 120; // 10 уже в блайнде → максимум 130
+  g.act(btn, { type: 'raise', amount: 100 });
+  g.act(sb, { type: 'raise', amount: 130 }); // +30 < минимального рейза 80
+  assert.ok(g.players[sb].allIn);
+  assert.equal(g.legal(bb).canRaise, true); // ББ ещё не ходил — может повышать
+  g.act(bb, { type: 'call' });
+  assert.equal(g.toAct, btn);
+  assert.equal(g.legal(btn).canRaise, false); // торговля для баттона не открылась
+  assert.equal(g.legal(btn).toCall, 30);
+});
+
+test('пот-оддсы считаются по банку, который можно выиграть', () => {
+  const g = mk(2, 4);
+  g.startHand();
+  const me = g.toAct, other = (me + 1) % 2;
+  g.act(me, { type: 'call' });
+  g.act(other, { type: 'check' }); // флоп, банк 40
+  const first = g.toAct, second = first === me ? other : me;
+  g.players[second].stack = 100;
+  g.act(first, { type: 'raise', amount: g.players[first].stack }); // олл-ин 1980
+  const L = g.legal(second);
+  assert.equal(L.toCall, 100);
+  assert.equal(g.winnablePot(second), 40 + 100); // чужие фишки сверх стека не в счёт
+});
