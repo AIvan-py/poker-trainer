@@ -1,0 +1,12 @@
+{
+  "name": "karmannye-tuzy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Тренажёр техасского холдема: стол с ботами и тренером",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "start": "python3 -m http.server 8000",
+    "artifact": "node scripts/build-artifact.mjs"
+  }
+}
