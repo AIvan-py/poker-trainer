@@ -158,7 +158,7 @@ h1 {
   position: absolute; inset: 7% 9% 6%;
   border-radius: 999px;
   background: radial-gradient(70% 55% at 50% 45%, var(--felt) 0%, var(--felt-deep) 100%);
-  border: 12px solid var(--rail);
+  border: 9px solid var(--rail);
   box-shadow:
     0 0 0 1.5px var(--brass-soft),
     inset 0 0 0 1.5px rgba(201, 163, 91, 0.45),
@@ -268,7 +268,12 @@ h1 {
 .tag { border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; }
 
 /* Тренер */
-.coach { padding: 0 var(--gutter); min-height: 58px; }
+.coach { padding: 0 var(--gutter); }
+.coach:empty { display: none; }
+.coach-pct { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.coach-pct b { font: 700 22px var(--f-display); color: var(--ivory); font-variant-numeric: tabular-nums; }
+.coach-pct span { color: var(--muted); font-size: 13px; }
+.coach-pct .link-btn { margin-left: auto; }
 .coach-box { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 9px 12px; }
 .coach-row { display: flex; align-items: center; gap: 8px; }
 .coach-who { font: 600 11px var(--f-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--brass); flex: none; }
@@ -411,3 +416,59 @@ h1 {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* ---------- Разбор раздачи ---------- */
+.review .page-body { padding-bottom: 110px; gap: 18px; }
+.review-bar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+  padding: 10px var(--gutter) calc(12px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(180deg, transparent, var(--room) 30%);
+}
+.review-bar .btn-primary { width: 100%; max-width: 620px; display: block; margin: 0 auto; }
+.rv-title { font: 700 22px/1.2 var(--f-display); margin: 0; text-wrap: balance; }
+.rv-sub { margin: 4px 0 0; color: var(--muted); }
+.rv-board { display: flex; gap: 6px; flex-wrap: wrap; }
+.rv-board .card { --cw: clamp(44px, 12vw, 56px); }
+.rv-note { margin: 0; color: var(--muted); font-size: 13.5px; }
+.eqpath { display: flex; gap: 6px; flex-wrap: wrap; align-items: stretch; }
+.eqpath .step { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); min-width: 78px; }
+.eqpath .step b { font: 700 20px var(--f-display); font-variant-numeric: tabular-nums; }
+.eqpath .step span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.eqpath .step.hi b { color: var(--good); }
+.eqpath .step.lo b { color: var(--bad); }
+.pb-list { display: flex; flex-direction: column; gap: 12px; }
+.pb {
+  display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 16px;
+  background: var(--panel); border: 1px solid var(--line); cursor: pointer;
+}
+.pb.won { border-color: rgba(92, 194, 131, 0.55); box-shadow: 0 0 0 1px rgba(92, 194, 131, 0.25); }
+.pb:focus-visible { outline: 2px solid var(--brass); }
+.pb-head { display: flex; align-items: center; gap: 10px; }
+.pb-head .avatar { width: 30px; height: 30px; font-size: 13px; }
+.pb-who { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; flex: 1; }
+.pb-who b { font-size: 15px; }
+.pb-who small { color: var(--muted); font-size: 12px; }
+.pb.won .pb-who b { color: var(--good); }
+.pb-hole { display: flex; gap: 4px; }
+.pb-hole .card { --cw: 36px; }
+.pb-hand { font: 700 19px/1.2 var(--f-display); text-wrap: balance; }
+.groups { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: flex-start; }
+.grp { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.grp-cards { display: flex; gap: 3px; padding: 4px; border-radius: 10px; border: 1.5px dashed var(--line); }
+.grp.main .grp-cards { border-color: var(--good); border-style: solid; background: rgba(92, 194, 131, 0.08); }
+.grp-cards .card { --cw: 38px; }
+.grp-label { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.grp.main .grp-label { color: var(--good); font-weight: 600; }
+.card.mine { box-shadow: 0 0 0 2px var(--brass), 0 2px 6px rgba(0, 0, 0, 0.45); }
+.pb-rule, .pb-why { margin: 0; font-size: 13.5px; color: #cfd6cf; }
+.pb-why { color: var(--ivory); font-weight: 600; }
+.legend-mine { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+.legend-mine i { display: inline-block; width: 14px; height: 20px; border-radius: 3px; background: var(--ivory); box-shadow: 0 0 0 2px var(--brass); }
+.done-row { display: flex; gap: 8px; }
+.done-row .btn-ghost, .done-row .btn-primary { flex: 1; min-height: 58px; }
+
+/* ---------- Установка на телефон ---------- */
+.install { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: var(--radius); background: var(--panel); border: 1px solid var(--line); }
+.install b { font-size: 15px; }
+.install span { color: var(--muted); font-size: 13.5px; }
+.install .btn-ghost { margin-top: 6px; min-height: 46px; }

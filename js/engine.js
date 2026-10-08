@@ -163,15 +163,15 @@ export class Game {
     let text;
     if (type === 'fold') {
       p.folded = true;
-      text = 'фолд';
-      p.lastAction = { type, text: 'Фолд' };
+      text = 'сбросил карты';
+      p.lastAction = { type, text: 'Сбросил' };
     } else if (type === 'check') {
       text = 'чек';
       p.lastAction = { type, text: 'Чек' };
     } else if (type === 'call') {
       this.put(p, L.toCall);
-      text = p.allIn ? `колл ${L.toCall} (олл-ин)` : `колл ${L.toCall}`;
-      p.lastAction = { type, text: p.allIn ? 'Олл-ин' : `Колл ${L.toCall}` };
+      text = p.allIn ? `уравнял ${L.toCall} (олл-ин)` : `уравнял ${L.toCall}`;
+      p.lastAction = { type, text: p.allIn ? 'Олл-ин' : `Уравнял ${L.toCall}` };
       this.updateRead(p, 'call');
     } else {
       const raiseTo = Math.max(L.minTo, Math.min(Math.round(action.amount ?? L.minTo), L.maxTo));
@@ -192,7 +192,7 @@ export class Game {
       this.updateRead(p, 'raise');
       this.raiseCount++;
       this.lastAggressor = i;
-      const word = wasBet ? 'Ставка' : 'Рейз до';
+      const word = wasBet ? 'Поставил' : 'Повысил до';
       text = `${word.toLowerCase()} ${raiseTo}${p.allIn ? ' (олл-ин)' : ''}`;
       p.lastAction = { type, text: p.allIn ? `Олл-ин ${raiseTo}` : `${word} ${raiseTo}` };
     }

@@ -7,6 +7,10 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Карманные тузы">
 <!--artifact-start-->
 <title>Карманные тузы</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -40,11 +44,21 @@
           <span class="hint" id="opp-hint"></span>
         </div>
         <div class="field">
-          <span class="label" id="lbl-hint">Совет тренера</span>
-          <div class="seg" role="radiogroup" aria-labelledby="lbl-hint" data-setting="hintMode">
-            <button type="button" data-value="auto">Показывать сразу</button>
-            <button type="button" data-value="button">По кнопке</button>
+          <span class="label" id="lbl-mode">Как играют боты</span>
+          <div class="seg" role="radiogroup" aria-labelledby="lbl-mode" data-setting="tableMode">
+            <button type="button" data-value="showdown">Все до вскрытия</button>
+            <button type="button" data-value="normal">Как в жизни</button>
           </div>
+          <span class="hint" id="mode-hint"></span>
+        </div>
+        <div class="field">
+          <span class="label" id="lbl-hint">Подсказки во время игры</span>
+          <div class="seg" role="radiogroup" aria-labelledby="lbl-hint" data-setting="coachMode">
+            <button type="button" data-value="percent">Проценты</button>
+            <button type="button" data-value="advice">Советы</button>
+            <button type="button" data-value="none">Ничего</button>
+          </div>
+          <span class="hint" id="coach-hint"></span>
         </div>
         <div class="field">
           <span class="label" id="lbl-speed">Скорость ботов</span>
@@ -64,6 +78,8 @@
       </div>
 
       <button type="button" class="btn-primary" id="btn-play">Сесть за стол</button>
+
+      <div class="install" id="install" hidden></div>
 
       <nav class="home-links">
         <button type="button" data-open="rules">Правила за 3 минуты</button>
@@ -96,8 +112,16 @@
     <div class="coach" id="coach" aria-live="polite"></div>
     <div class="actions" id="actions"></div>
 
-    <div class="sheet-backdrop" id="result-backdrop" hidden></div>
-    <div class="sheet result" id="result" hidden></div>
+  </section>
+
+  <!-- Разбор раздачи -->
+  <section class="screen page review" id="screen-review" hidden>
+    <header class="page-head">
+      <button type="button" class="icon-btn" data-back aria-label="К столу">‹</button>
+      <h2 id="review-title">Разбор раздачи</h2>
+    </header>
+    <div class="page-body" id="review-body"></div>
+    <div class="review-bar"><button type="button" class="btn-primary" id="next-hand">Следующая раздача</button></div>
   </section>
 
   <!-- Правила -->

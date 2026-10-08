@@ -13,11 +13,11 @@ const plural = (n, one, few, many) => {
 };
 
 export function actionLabel(type, amount, L) {
-  if (type === 'fold') return 'Фолд';
-  if (type === 'check') return 'Чек';
-  if (type === 'call') return L.toCall >= L.stack ? `Олл-ин ${L.toCall}` : `Колл ${L.toCall}`;
+  if (type === 'fold') return 'Сбросить';
+  if (type === 'check') return 'Пропустить (чек)';
+  if (type === 'call') return L.toCall >= L.stack ? `Олл-ин ${L.toCall}` : `Уравнять ${L.toCall}`;
   if (amount >= L.maxTo) return `Олл-ин ${amount}`;
-  return L.currentBet === 0 ? `Ставка ${amount}` : `Рейз до ${amount}`;
+  return L.currentBet === 0 ? `Поставить ${amount}` : `Повысить до ${amount}`;
 }
 
 function strengthWord(pct) {
@@ -41,6 +41,7 @@ export function advise(game, idx) {
   const info = d.info;
   const lines = [];
   let why = '';
+  let facts = 0;
   const p = game.players[idx];
 
   if (info.street === 0) {
@@ -48,6 +49,7 @@ export function advise(game, idx) {
     const posInfo = POSITION_INFO[info.pos];
     lines.push(`${code}: топ-${Math.max(1, pc(info.pct))}% стартовых рук — ${strengthWord(info.pct)}.`);
     lines.push(`Позиция: ${posInfo.name.toLowerCase()} — ${posInfo.note}.`);
+    facts = lines.length;
     switch (info.reason) {
       case 'open':
         lines.push(`Когда до тебя все сбросили, отсюда открывают примерно ${pc(info.cont)}% лучших рук. Твоя рука подходит — повышай.`);
@@ -108,8 +110,9 @@ export function advise(game, idx) {
     }
     lines.push(`Шанс выиграть (эквити) ≈ ${pc(info.eq)}% против ${info.n} ${plural(info.n, 'соперника', 'соперников', 'соперников')}.`);
     if (info.toCall > 0) {
-      lines.push(`Пот-оддсы: платишь ${info.toCall}, чтобы побороться за ${info.pot + info.toCall}. Колл окупается, если выигрываешь чаще ${pc(info.potOdds)}% раз.`);
+      lines.push(`Цена: платишь ${info.toCall}, чтобы побороться за ${info.pot + info.toCall}. Уравнивать выгодно, если выигрываешь чаще ${pc(info.potOdds)}% раз.`);
     }
+    facts = lines.length;
     switch (info.reason) {
       case 'value':
         lines.push('Рука сильная — ставь, чтобы более слабые руки платили тебе (ставка на ценность).');
@@ -144,7 +147,7 @@ export function advise(game, idx) {
     }
   }
 
-  return { type: d.type, amount: d.amount, label: actionLabel(d.type, d.amount, L), lines, why, info, L };
+  return { type: d.type, amount: d.amount, label: actionLabel(d.type, d.amount, L), lines, facts: lines.slice(0, facts), why, info, L };
 }
 
 /** Оценка хода игрока: good / ok / bad. */

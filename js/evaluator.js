@@ -1,5 +1,7 @@
 // Оценка руки из 1–7 карт. Чем больше число, тем сильнее рука.
 // score = категория * 16^5 + старшинство до пяти рангов.
+import { SUIT_SYMBOLS } from './cards.js';
+
 const BASE = 16 ** 5;
 
 export const CATEGORY_NAMES = [
@@ -174,4 +176,59 @@ export function explainHand(hole, board) {
     combo,
     fromHand: five.filter((c) => hole.includes(c)),
   };
+}
+
+const byRankDesc = (a, b) => (b >> 2) - (a >> 2);
+
+/** Комбинация, разложенная по группам с подписями: [J J] пара · [8 8] пара · [10] кикер. */
+export function handGroups(hole, board) {
+  const all = hole.concat(board);
+  const score = evaluate(all);
+  const cat = category(score);
+  const five = all.length >= 5 ? bestFive(all) : all.slice();
+  const r = ranksOf(score);
+  const ofRank = (rk) => five.filter((c) => (c >> 2) === rk);
+  const rest = (used) => five.filter((c) => !used.includes(c)).sort(byRankDesc);
+  switch (cat) {
+    case 0: {
+      const sorted = five.slice().sort(byRankDesc);
+      return [{ label: 'старшая', cards: [sorted[0]], main: true }, { label: 'остальные', cards: sorted.slice(1) }];
+    }
+    case 1: { const p = ofRank(r[0]); return [{ label: 'пара', cards: p, main: true }, { label: 'кикеры', cards: rest(p) }]; }
+    case 2: {
+      const a = ofRank(r[0]), b = ofRank(r[1]);
+      return [{ label: 'пара', cards: a, main: true }, { label: 'пара', cards: b, main: true }, { label: 'кикер', cards: rest([...a, ...b]) }];
+    }
+    case 3: { const t = ofRank(r[0]); return [{ label: 'тройка', cards: t, main: true }, { label: 'кикеры', cards: rest(t) }]; }
+    case 4:
+    case 8: {
+      let seq = five.slice().sort((a, b) => (a >> 2) - (b >> 2));
+      if (r[0] === 3) { const ace = seq.find((c) => (c >> 2) === 12); seq = [ace, ...seq.filter((c) => c !== ace)]; }
+      const label = cat === 8 ? (r[0] === 12 ? 'от десятки до туза, одна масть' : 'подряд и одной масти') : 'пять подряд';
+      return [{ label, cards: seq, main: true }];
+    }
+    case 5: return [{ label: `все ${SUIT_SYMBOLS[five[0] & 3]}`, cards: five.slice().sort(byRankDesc), main: true }];
+    case 6: { const t = ofRank(r[0]), p = ofRank(r[1]); return [{ label: 'тройка', cards: t, main: true }, { label: 'пара', cards: p, main: true }]; }
+    case 7: { const q = ofRank(r[0]); return [{ label: 'каре', cards: q, main: true }, { label: 'кикер', cards: rest(q) }]; }
+    default: return [{ label: '', cards: five }];
+  }
+}
+
+/** Почему рука w побеждает руку l (обе — результат explainHand). */
+export function whyBeats(w, l) {
+  if (w.score === l.score) return 'Руки равны — банк делится';
+  if (w.cat !== l.cat) return `${w.short} сильнее, чем ${l.short.toLowerCase()}`;
+  const a = ranksOf(w.score), b = ranksOf(l.score);
+  const i = a.findIndex((x, k) => x !== b[k]);
+  const both = `У обоих ${w.short.toLowerCase()}`;
+  const cat = w.cat;
+  if (cat === 4 || cat === 8) return `${both}, но до ${GEN[a[0]]} старше, чем до ${GEN[b[0]]}`;
+  if (cat === 5) return `${both}, но старшая карта ${NOM[a[i]]} старше, чем ${NOM[b[i]]}`;
+  if (cat === 0) return `${both}, решает ${i === 0 ? 'старшая карта' : 'следующая карта'}: ${NOM[a[i]]} старше, чем ${NOM[b[i]]}`;
+  const groups = cat === 2 ? 2 : cat === 6 ? 2 : 1;
+  if (i < groups) {
+    const what = cat === 2 ? (i === 0 ? 'старшая пара' : 'вторая пара') : cat === 6 ? (i === 0 ? 'тройка' : 'пара') : cat === 1 ? 'пара' : cat === 3 ? 'тройка' : 'каре';
+    return `${both}, но ${what} ${NOM_PL[a[i]]} старше, чем ${NOM_PL[b[i]]}`;
+  }
+  return `${both} и одинаковые по старшинству, решает кикер: ${NOM[a[i]]} старше, чем ${NOM[b[i]]}`;
 }

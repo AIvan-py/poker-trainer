@@ -5,8 +5,8 @@ import { advise, grade, actionLabel } from './coach.js';
 import { rankOf, suitOf, rankLabel, SUIT_SYMBOLS, SUITS, parseCards, prettyCard } from './cards.js';
 import { analyze, drawText } from './handinfo.js';
 import { handPct, POSITION_INFO } from './preflop.js';
-import { evaluate, shortName, rankName, comboCards, explainHand } from './evaluator.js';
-import { equityKnown } from './equity.js';
+import { evaluate, shortName, rankName, comboCards, explainHand, handGroups, whyBeats } from './evaluator.js';
+import { equity, equityKnown } from './equity.js';
 import { rigForPlayer } from './rig.js';
 
 const $ = (s) => document.querySelector(s);
@@ -44,15 +44,25 @@ const LAYOUTS = {
   6: [[50, 87], [12, 72], [12, 33], [50, 13], [88, 33], [88, 72]],
 };
 
-const settings = Object.assign({ opponents: 3, hintMode: 'auto', speed: 'normal', fourColor: false, comboBoost: false }, store.get('settings', {}));
-const stats = Object.assign({ hands: 0, won: 0, net: 0, good: 0, ok: 0, bad: 0, mistakes: [] }, store.get('stats', {}));
+const settings = Object.assign({ opponents: 3, coachMode: 'percent', tableMode: 'showdown', speed: 'normal', fourColor: false, comboBoost: false }, store.get('settings', {}));
+if (settings.hintMode) { settings.coachMode = 'advice'; delete settings.hintMode; }
+const stats = Object.assign({ hands: 0, won: 0, wonSd: 0, wonFold: 0, net: 0, good: 0, ok: 0, bad: 0, mistakes: [] }, store.get('stats', {}));
+const MODE_HINT = {
+  showdown: 'Боты не сбрасывают и не повышают — только уравнивают. Каждая раздача доходит до вскрытия, колода честная. Так видно по правде, как часто слабые карты проигрывают.',
+  normal: 'Боты играют по своему характеру: сбрасывают, блефуют, повышают. Банк часто уходит без вскрытия.',
+};
+const COACH_HINT = {
+  percent: 'Без советов: только твой шанс выиграть и цена колла. Играй до конца и смотри, как шанс меняется от улицы к улице.',
+  advice: 'Тренер советует ход, объясняет почему и оценивает твои решения. Учти: с несколькими соперниками он часто советует сбросить — так играют на дистанции.',
+  none: 'Чистый стол. Разбор с комбинациями всё равно будет после каждой раздачи.',
+};
 
 let game = null;
 let meta = [];
 const ui = {
   advice: null, open: false, asked: false, feedback: null, review: [],
   raiseTo: 0, timer: null, dealtBoard: 0, newDeal: false, revealAll: false,
-  handStart: 0, lastStreet: 0, resultShown: false, whatIf: null,
+  handStart: 0, lastStreet: 0, resultShown: false, whatIf: null, eq: null, eqPath: [],
 };
 
 /* ---------- Карты ---------- */
@@ -71,6 +81,7 @@ function showScreen(name) {
   for (const el of $$('.screen')) el.hidden = el.id !== `screen-${name}`;
   if (name === 'home') renderHome();
   if (name === 'stats') renderStats();
+  if (name === 'review') { renderReview(); window.scrollTo(0, 0); $('#screen-review').scrollTop = 0; }
 }
 
 function openSheet(id, focus = null) {
@@ -96,8 +107,34 @@ function renderHome() {
   $('#opt-4color').checked = settings.fourColor;
   $('#opt-combo').checked = settings.comboBoost;
   $('#opp-hint').textContent = OPP_HINT[settings.opponents];
+  $('#coach-hint').textContent = COACH_HINT[settings.coachMode];
+  $('#mode-hint').textContent = MODE_HINT[settings.tableMode];
   $('#btn-play').textContent = game ? 'Вернуться за стол' : 'Сесть за стол';
+  renderInstall();
   document.body.classList.toggle('four-color', settings.fourColor);
+}
+
+/* ---------- Установка как приложение ---------- */
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; renderInstall(); });
+window.addEventListener('appinstalled', () => { installPrompt = null; renderInstall(); });
+
+function renderInstall() {
+  const el = $('#install');
+  let standalone = false;
+  try { standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; } catch { /* нет matchMedia */ }
+  const embedded = window.top !== window; // внутри claude.ai установка недоступна
+  if (standalone || embedded) { el.hidden = true; return; }
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (installPrompt) {
+    el.innerHTML = `<b>Установить как приложение</b><span>Иконка на рабочем столе, запуск без браузера, работает без интернета.</span>
+      <button type="button" class="btn-ghost" id="install-btn">Установить на телефон</button>`;
+  } else if (ios) {
+    el.innerHTML = `<b>Добавить на экран «Домой»</b><span>В Safari нажми «Поделиться» (квадрат со стрелкой вверх) → «На экран “Домой”» → «Добавить». Появится иконка, как у обычного приложения.</span>`;
+  } else {
+    el.innerHTML = `<b>Установить как приложение</b><span>В Chrome открой меню ⋮ → «Установить приложение» (или «Добавить на главный экран»). Появится иконка на рабочем столе.</span>`;
+  }
+  el.hidden = false;
 }
 
 function saveSettings() {
@@ -122,11 +159,11 @@ function newHand() {
   game.startHand();
   Object.assign(ui, {
     advice: null, open: false, asked: false, feedback: null, review: [],
-    dealtBoard: 0, newDeal: true, revealAll: false, resultShown: false, lastStreet: 0, whatIf: null,
+    dealtBoard: 0, newDeal: true, revealAll: false, resultShown: false, lastStreet: 0, whatIf: null, eq: null, eqPath: [],
   });
   const me = game.players[0];
   ui.handStart = me.stack + me.total;
-  hideResult();
+  if (current === 'review') showScreen('table');
   if (game.rebought.includes(0)) toast('Фишки закончились — ты докупился на 2 000. Это тренировка, всё в порядке.');
   loop();
 }
@@ -150,10 +187,14 @@ function loop() {
     if (p.isHuman) {
       ui.advice = advise(game, 0);
       ui.asked = false;
+      // шанс выиграть на этом решении — для режима «Проценты» и для разбора по улицам
+      const reads = game.live().filter((q) => q.id !== 0).map((q) => q.read);
+      ui.eq = game.street === 0 ? equity(p.hole, [], reads, 1500) : ui.advice.info.eq;
+      ui.eqPath.push({ street: game.street, eq: ui.eq });
       // защита от двойного касания: кнопки оживают не сразу после появления
       ui.actReadyAt = performance.now() + 450;
       const L = game.legal(0);
-      const coachSize = settings.hintMode === 'auto' && ui.advice.type === 'raise';
+      const coachSize = settings.coachMode === 'advice' && ui.advice.type === 'raise';
       ui.raiseTo = coachSize ? ui.advice.amount : presets(L)[0]?.amount ?? L.minTo;
       render();
       return;
@@ -162,10 +203,15 @@ function loop() {
     document.documentElement.style.setProperty('--think', `${delay}ms`);
     render();
     ui.timer = setTimeout(() => {
-      const d = decide(game, idx, STYLES[p.style], Math.random, 700);
+      const showdownMode = settings.tableMode === 'showdown';
+      const d = showdownMode
+        ? { type: game.legal(idx).toCall > 0 ? 'call' : 'check' } // только уравнивает — до вскрытия
+        : decide(game, idx, STYLES[p.style], Math.random, 700);
       // «что было бы» для соперника — только когда его фолд завершил раздачу один на один
       if (d.type === 'fold' && !game.players[0].folded && game.live().length === 2) ui.whatIf = snapshot('bot', [idx]);
       game.act(idx, d);
+      // в этом режиме колл ничего не говорит о руке — диапазон соперника остаётся случайным
+      if (showdownMode) p.read = { pct: 1, aggr: 0, calls: 0 };
       loop();
     }, delay);
   } else if (game.phase === 'runout') {
@@ -176,7 +222,7 @@ function loop() {
     if (!ui.resultShown) {
       ui.resultShown = true;
       recordHand();
-      ui.timer = setTimeout(showResult, game.result.showdown ? 900 : 500);
+      ui.timer = setTimeout(() => showScreen('review'), game.result.showdown ? 1400 : 700);
     }
   }
 }
@@ -187,7 +233,7 @@ function humanAct(type) {
   const L = game.legal(0);
   const amount = type === 'raise' ? ui.raiseTo : undefined;
   const shownType = type === 'call' && L.toCall === 0 ? 'check' : type;
-  if (ui.advice) {
+  if (ui.advice && settings.coachMode === 'advice') {
     const g = grade(ui.advice, { type, amount });
     const fb = { ...g, label: actionLabel(shownType, amount, L), street: game.street, advice: ui.advice.label };
     ui.feedback = fb;
@@ -201,7 +247,7 @@ function humanAct(type) {
   }
   if (type === 'fold' && !L.canCheck) {
     const opps = game.live().filter((q) => q.id !== 0).map((q) => q.id);
-    ui.whatIf = snapshot('me', opps, ui.advice?.info?.eq);
+    ui.whatIf = snapshot('me', opps, ui.eq ?? undefined);
   }
   ui.advice = null;
   closeSheet('explain');
@@ -209,27 +255,36 @@ function humanAct(type) {
   loop();
 }
 
-/* ---------- Строки вскрытия: кто с чем и из каких карт ---------- */
-/** Строки списка: победители первыми, потом по силе руки. Для каждого — 5 лучших карт с подсветкой комбинации. */
-function handRows(entries, board) {
+/* ---------- Карточки игроков в разборе: комбинация по группам ---------- */
+/** Победители первыми, потом по силе руки. Каждому — его карты, комбинация по группам и почему она слабее лучшей. */
+function playerBlocks(entries, board) {
   const sorted = [...entries].sort((a, b) => (b.won - a.won) || (b.score - a.score));
+  const best = explainHand(game.players[sorted[0].id].hole, board);
   return sorted.map((x) => {
     const p = game.players[x.id];
     const ex = explainHand(p.hole, board);
+    const groups = handGroups(p.hole, board);
+    const mine = new Set(p.hole);
     const who = x.id === 0 ? 'Ты' : esc(p.name);
     const inCombo = ex.fromHand.filter((c) => ex.combo.has(c));
     const whose = x.id === 0 ? 'твоей руки' : 'руки';
-    const fromHand = inCombo.length ? `В комбинации из ${whose}: ${inCombo.map(prettyCard).join(' ')}`
-      : ex.fromHand.length ? `Из ${whose} в счёт идёт только кикер: ${ex.fromHand.map(prettyCard).join(' ')}`
-        : `Комбинация целиком на столе, ${x.id === 0 ? 'твоя' : ''} рука не участвует`;
-    return `<li class="${x.won ? 'won' : ''}" data-combo="${esc(ex.short)}" role="button" tabindex="0" title="Открыть в справочнике">
-      <div class="sd-top">
-        <span class="sd-cards">${p.hole.map((c) => cardHTML(c, ex.combo.has(c) ? 'combo' : 'dim')).join('')}</span>
-        <span class="sd-who"><b>${who}${x.won ? ' · выиграл' + (x.id !== 0 && isF(x.id) ? 'а' : '') : ''}</b><small>${esc(ex.name)}</small></span>
+    const fromHand = inCombo.length ? `в комбинации из ${whose}: ${inCombo.map(prettyCard).join(' ')}`
+      : ex.fromHand.length ? `из ${whose} в счёт идёт только кикер ${ex.fromHand.map(prettyCard).join(' ')}`
+        : `комбинация целиком на столе, ${x.id === 0 ? 'твоя' : ''} рука не участвует`;
+    const why = x.won ? (x.id === 0 ? 'Лучшая рука за столом' : `Лучшая рука за столом`) : whyBeats(best, ex);
+    return `<article class="pb ${x.won ? 'won' : ''}" data-combo="${esc(ex.short)}" role="button" tabindex="0" title="Открыть в справочнике">
+      <div class="pb-head">
+        <span class="avatar" style="--c:${meta[x.id].color}">${x.id === 0 ? 'Я' : esc(p.name[0])}</span>
+        <span class="pb-who"><b>${who}${x.won ? ' · выиграл' + (x.id !== 0 && isF(x.id) ? 'а' : '') : ''}</b><small>${x.id === 0 ? 'твои карты' : 'карты'} →</small></span>
+        <span class="pb-hole">${p.hole.map((c) => cardHTML(c, 'mine')).join('')}</span>
       </div>
-      <div class="sd-five">${ex.five.map((c) => cardHTML(c, ex.combo.has(c) ? 'combo' : '')).join('')}</div>
-      <span class="sd-rule">${esc(cap(ex.rule))}. ${esc(fromHand)}.</span>
-    </li>`;
+      <div class="pb-hand">${esc(ex.name)}</div>
+      <div class="groups">${groups.map((g) => `<div class="grp ${g.main ? 'main' : ''}">
+        <div class="grp-cards">${g.cards.map((c) => cardHTML(c, mine.has(c) ? 'mine' : '')).join('')}</div>
+        <span class="grp-label">${esc(g.label)}</span></div>`).join('')}</div>
+      <p class="pb-rule">${esc(cap(ex.rule))}; ${esc(fromHand)}.</p>
+      <p class="pb-why">${esc(why)}</p>
+    </article>`;
   }).join('');
 }
 
@@ -250,6 +305,8 @@ function snapshot(by, oppIds, coachEq) {
   };
 }
 
+const STREET_LOC = ['на префлопе', 'на флопе', 'на тёрне', 'на ривере'];
+
 function whatIfHTML(w) {
   const me = game.players[0];
   if (w.eq === null) w.eq = equityKnown(w.hole, w.oppHoles, w.board, 10000);
@@ -262,29 +319,92 @@ function whatIfHTML(w) {
   const verb = others.length > 1 ? 'выиграли бы' : isF(others[0]) ? 'выиграла бы' : 'выиграл бы';
   const verdict = meWins ? (winners.length > 1 ? 'ты бы разделил банк' : 'ты бы выиграл') : `${verb} ${others.map((id) => game.players[id].name).join(' и ')}`;
   const eq = Math.round(w.eq * 100);
-  const where = STREET_NAMES[w.street].toLowerCase();
   let head, lesson;
   if (w.by === 'me') {
-    head = `Ты сбросил на ${where === 'префлоп' ? 'префлопе' : where === 'флоп' ? 'флопе' : where === 'тёрн' ? 'тёрне' : 'ривере'}. Если доиграть до конца, ${verdict}.`;
+    head = `Ты сбросил ${STREET_LOC[w.street]}. Если бы доиграл до конца, ${verdict}.`;
     lesson = eq >= 50
-      ? `Зная карты соперников, твой шанс был ${eq}% — ты был фаворитом. Этот фолд стоил фишек.`
+      ? `Зная карты соперников, твой шанс был ${eq}% — ты был фаворитом.`
       : eq >= 30
-        ? `Зная карты соперников, твой шанс был ${eq}%. Шансы средние: решай по пот-оддсам — сколько стоит колл относительно банка.`
-        : `Зная карты соперников, твой шанс был всего ${eq}% — фолд правильный${meWins ? ', даже если в этот раз повезло бы' : ''}.`;
+        ? `Зная карты соперников, твой шанс был ${eq}% — примерно поровну.`
+        : `Зная карты соперников, твой шанс был всего ${eq}%${meWins ? ' — в этот раз просто повезло бы' : ''}.`;
   } else {
     const opp = game.players[w.oppIds[0]].name;
     const f = isF(w.oppIds[0]);
-    head = `${opp} ${f ? 'сбросила' : 'сбросил'}. Если бы ${f ? 'она доиграла' : 'он доиграл'} до конца, ${verdict}.`;
+    head = `${opp} ${f ? 'сбросила' : 'сбросил'} ${STREET_LOC[w.street]}. Если бы ${f ? 'она доиграла' : 'он доиграл'} до конца, ${verdict}.`;
     lesson = `Твой шанс против ${f ? 'её' : 'его'} карт в тот момент: ${eq}%.`;
   }
-  const coach = w.coachEq !== undefined ? ` Тренер, не видя чужих карт, оценивал ${Math.round(w.coachEq * 100)}%.` : '';
-  const rows = handRows(scores.map((x) => ({ ...x, won: winners.includes(x.id) })), w.runout);
-  const myCombo = new Set(comboCards(me.hole.concat(w.runout)));
-  return `<div class="section-label">Что было бы, если доиграть до конца</div>
-    <p class="whatif-head">${esc(head)}</p>
-    <div class="whatif-board">${w.runout.map((c, k) => cardHTML(c, [k >= w.board.length ? 'future' : '', myCombo.has(c) ? 'combo' : ''].join(' '))).join('')}</div>
-    <ul class="sd-list">${rows}</ul>
-    <p class="whatif-lesson">${esc(lesson + coach)} Один исход — это везение или невезение; учись по проценту.</p>`;
+  const coach = w.coachEq !== undefined ? ` Не видя чужих карт, расчёт давал ${Math.round(w.coachEq * 100)}%.` : '';
+  const blocks = playerBlocks(scores.map((x) => ({ ...x, won: winners.includes(x.id) })), w.runout);
+  return `<div class="section-label">Если бы доиграть до конца</div>
+    <p class="rv-note" style="color:var(--text);font-weight:600">${esc(head)}</p>
+    <div class="rv-board">${w.runout.map((c, k) => cardHTML(c, k >= w.board.length ? 'future' : '')).join('')}</div>
+    <p class="rv-note">Карты в пунктирной рамке ещё не вышли, когда раздача закончилась.</p>
+    <div class="pb-list">${blocks}</div>
+    <p class="rv-note">${esc(lesson + coach)} Один исход — везение или невезение; учись по проценту.</p>`;
+}
+
+/* ---------- Экран разбора раздачи ---------- */
+function eqPathHTML() {
+  if (!ui.eqPath.length) return '';
+  const last = {};
+  for (const e of ui.eqPath) last[e.street] = e.eq;
+  const steps = Object.keys(last).map(Number).sort().map((st) => {
+    const v = Math.round(last[st] * 100);
+    return `<div class="step ${v >= 55 ? 'hi' : v < 25 ? 'lo' : ''}"><b>${v}%</b><span>${STREET_NAMES[st]}</span></div>`;
+  });
+  return `<div><div class="section-label">Твой шанс выиграть по улицам</div><div class="eqpath">${steps.join('')}</div>
+    <p class="rv-note" style="margin-top:8px">Считалось без знания чужих карт — так, как видел ситуацию ты.</p></div>`;
+}
+
+function renderReview() {
+  const r = game?.result;
+  if (!r || game.phase !== 'done') return;
+  const me = game.players[0];
+  const net = me.stack - ui.handStart;
+  const total = Object.values(r.winnings).reduce((a, b) => a + b, 0);
+  const winnerIds = Object.keys(r.winnings).map(Number);
+  const names = winnerIds.map((id) => (id === 0 ? 'ты' : game.players[id].name));
+  let title;
+  if (r.winnings[0] && winnerIds.length === 1) title = `Ты выиграл банк ${fmt(total)}`;
+  else if (r.winnings[0]) title = `Ты забираешь ${fmt(r.winnings[0])} из ${fmt(total)}`;
+  else title = `Банк ${fmt(total)} забирает ${names.join(', ')}`;
+  const netText = `${net > 0 ? '+' : ''}${fmt(net)}`;
+  const sub = r.showdown
+    ? `Дошли до вскрытия. Итог для тебя: ${netText}`
+    : me.folded ? `Ты сбросил карты. Итог для тебя: ${netText}` : `Остальные сбросили — вскрытия не было. Итог для тебя: ${netText}`;
+
+  let body = '';
+  if (r.showdown) {
+    const entries = game.players.filter((p) => !p.folded).map((p) => ({ id: p.id, score: r.hands[p.id].score, won: !!r.winnings[p.id] }));
+    body += `<div><div class="section-label">На столе</div><div class="rv-board">${game.board.map((c) => cardHTML(c)).join('')}</div></div>
+      <div><div class="section-label">Вскрытие: кто с чем</div>
+      <p class="rv-note" style="margin-bottom:10px"><span class="legend-mine"><i></i> карты из руки игрока · зелёная рамка — сама комбинация</span></p>
+      <div class="pb-list">${playerBlocks(entries, game.board)}</div></div>`;
+  } else if (ui.whatIf && (ui.whatIf.by === 'me' || !r.showdown)) {
+    body += `<div>${whatIfHTML(ui.whatIf)}</div>`;
+  } else {
+    body += game.board.length
+      ? `<div><div class="section-label">На столе</div><div class="rv-board">${game.board.map((c) => cardHTML(c)).join('')}</div>
+         <p class="rv-note" style="margin-top:8px">Все сбросили до вскрытия, чужие карты не показываются — как в настоящей игре.</p></div>`
+      : '<p class="rv-note">Все сбросили ещё до флопа — карты на стол не вышли.</p>';
+    const folded = game.players.filter((p) => p.id !== 0 && p.folded);
+    if (folded.length && !ui.revealAll) body += `<button type="button" class="btn-ghost" id="reveal">Подсмотреть карты соперников</button>`;
+    else if (ui.revealAll) {
+      const entries = game.players.filter((p) => p.id !== 0).map((p) => ({ id: p.id, score: evaluate(p.hole.concat(game.board)), won: false }));
+      if (game.board.length >= 3) body += `<div class="pb-list">${playerBlocks([{ id: 0, score: evaluate(me.hole.concat(game.board)), won: false }, ...entries], game.board)}</div>`;
+      else body += `<div class="pb-list">${game.players.filter((p) => p.id !== 0).map((p) => `<article class="pb"><div class="pb-head"><span class="avatar" style="--c:${meta[p.id].color}">${esc(p.name[0])}</span><span class="pb-who"><b>${esc(p.name)}</b></span><span class="pb-hole">${p.hole.map((c) => cardHTML(c)).join('')}</span></div></article>`).join('')}</div>`;
+    }
+  }
+  body += eqPathHTML();
+  if (settings.coachMode === 'advice') {
+    body += ui.review.length
+      ? `<div><div class="section-label">Разбор твоих решений</div><ul class="review">${ui.review.map((f) => `
+          <li><span class="rv-head">${gradeChip(f)}${STREET_NAMES[f.street]}: ${esc(f.label.toLowerCase())}</span>
+          <span class="rv-text">${esc(f.text)}</span></li>`).join('')}</ul></div>`
+      : '<p class="rv-note">В этой раздаче тебе не пришлось принимать решений.</p>';
+  }
+  $('#review-title').textContent = `Раздача ${game.handNo}`;
+  $('#review-body').innerHTML = `<div><h2 class="rv-title">${esc(title)}</h2><p class="rv-sub">${esc(sub)}</p></div>${body}`;
 }
 
 /* ---------- Размер ставки ---------- */
@@ -374,7 +494,7 @@ function renderSeats() {
         ${i === game.dealer ? `<span class="dealer${x > 70 ? ' inner' : ''}" title="Баттон (дилер)">D</span>` : ''}
       </div>
       ${p.bet > 0 && !done ? `<span class="bet bet-${betSide(x, y)}"><span class="chip"></span>${fmt(p.bet)}</span>` : ''}
-      <span class="pos-tag">${game.position(i)}${st ? ` · ${st.label.toLowerCase()}` : ''}</span>
+      <span class="pos-tag">${game.position(i)}${st && settings.tableMode !== 'showdown' ? ` · ${st.label.toLowerCase()}` : ''}</span>
     </div>`;
   });
   $('#seats').innerHTML = html;
@@ -457,19 +577,28 @@ function gradeChip(g) {
 function renderExplain() {
   const adv = ui.advice;
   if (!adv) return false;
-  $('#explain').innerHTML = `<div class="sheet-head"><h2>Тренер: ${esc(adv.label.toLowerCase())}</h2>
+  const neutral = settings.coachMode !== 'advice';
+  const lines = neutral ? adv.facts : adv.lines;
+  $('#explain').innerHTML = `<div class="sheet-head"><h2>${neutral ? 'Твоя ситуация' : `Тренер: ${esc(adv.label.toLowerCase())}`}</h2>
       <button type="button" class="icon-btn" data-close="explain" aria-label="Закрыть">✕</button></div>
-    <ul class="coach-lines">${adv.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>
+    <ul class="coach-lines">${lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>
     <button type="button" class="btn-primary" data-close="explain">Понятно</button>`;
   return true;
 }
 
 function renderCoach() {
   const el = $('#coach');
+  const mode = settings.coachMode;
+  if (mode === 'none') { el.innerHTML = ''; return; }
   const myTurn = game.phase === 'betting' && game.toAct === 0 && ui.advice;
   if (myTurn) {
-    if (settings.hintMode === 'button' && !ui.asked) {
-      el.innerHTML = `<button type="button" class="coach-ask" id="ask">Спросить тренера</button>`;
+    if (mode === 'percent') {
+      const L = ui.advice.L;
+      const pot = game.winnablePot(0);
+      const price = L.toCall > 0 ? `уравнять ${fmt(L.toCall)} = ${Math.round((L.toCall / (pot + L.toCall)) * 100)}% банка` : 'ставок пока нет';
+      el.innerHTML = `<div class="coach-box"><div class="coach-pct">
+        <b>${Math.round(ui.eq * 100)}%</b><span>шанс выиграть · ${esc(price)}</span>
+        <button type="button" class="link-btn" id="why">Подробнее</button></div></div>`;
       return;
     }
     const adv = ui.advice;
@@ -482,7 +611,7 @@ function renderCoach() {
     </div>`;
     return;
   }
-  if (ui.feedback) {
+  if (ui.feedback && mode === 'advice') {
     const f = ui.feedback;
     el.innerHTML = `<div class="coach-box">
       <div class="coach-row">${gradeChip(f)}<span class="coach-main">${esc(f.title)}: ${esc(f.label.toLowerCase())}</span></div>
@@ -490,43 +619,49 @@ function renderCoach() {
     </div>`;
     return;
   }
-  let text = 'Тренер следит за раздачей.';
+  let text = '';
   if (game.phase === 'betting') {
     const p = game.players[game.toAct];
     const st = STYLES[p.style];
-    text = `Ходит ${p.name}${st ? ` (${st.label.toLowerCase()}: ${st.desc})` : ''}…`;
-  }
-  el.innerHTML = `<div class="coach-box"><div class="coach-row"><span class="coach-who">Тренер</span><span class="coach-main muted">${esc(text)}</span></div></div>`;
+    text = settings.tableMode === 'showdown' ? `Ходит ${p.name} — в этом режиме боты только уравнивают…` : `Ходит ${p.name}${st ? ` (${st.label.toLowerCase()}: ${st.desc})` : ''}…`;
+  } else if (game.phase === 'runout') text = 'Все в олл-ине — открываем карты.';
+  else if (game.phase === 'done') text = 'Раздача окончена — открой разбор.';
+  el.innerHTML = `<div class="coach-box"><div class="coach-row"><span class="coach-who">${mode === 'advice' ? 'Тренер' : 'Стол'}</span><span class="coach-main muted">${esc(text)}</span></div></div>`;
 }
 
 function renderActions() {
   const el = $('#actions');
   const myTurn = game.phase === 'betting' && game.toAct === 0;
+  if (game.phase === 'done') {
+    el.innerHTML = `<div class="done-row">
+      <button type="button" class="btn-ghost" data-open="review">Разбор раздачи</button>
+      <button type="button" class="btn-primary" id="next-hand">Следующая раздача</button>
+    </div>`;
+    return;
+  }
   if (!myTurn) {
     const me = game.players[0];
-    const msg = game.phase === 'done' ? 'Раздача окончена'
-      : me.folded ? 'Ты сбросил карты — досматриваем раздачу'
+    const msg = me.folded ? 'Ты сбросил карты — досматриваем раздачу'
       : game.phase === 'runout' ? 'Открываем оставшиеся карты'
       : 'Ждём ход соперника';
     el.innerHTML = `<div class="waiting">${msg}</div>
       <div class="act-row">
-        <button type="button" class="act fold" disabled>Фолд<small>сбросить</small></button>
-        <button type="button" class="act call" disabled>Чек / Колл<small>уравнять</small></button>
-        <button type="button" class="act raise" disabled>Рейз<small>повысить</small></button>
+        <button type="button" class="act fold" disabled>Сбросить<small>фолд</small></button>
+        <button type="button" class="act call" disabled>Уравнять<small>колл</small></button>
+        <button type="button" class="act raise" disabled>Повысить<small>рейз</small></button>
       </div>`;
     return;
   }
   const L = game.legal(0);
-  const showSuggest = settings.hintMode === 'auto' || ui.asked;
-  const sug = showSuggest && ui.advice ? ui.advice.type : null;
+  const sug = settings.coachMode === 'advice' && ui.advice ? ui.advice.type : null;
   const list = presets(L);
   const raiseTo = Math.max(L.minTo, Math.min(ui.raiseTo, L.maxTo));
   ui.raiseTo = raiseTo;
-  const raiseWord = raiseTo >= L.maxTo ? `Олл-ин ${fmt(raiseTo)}` : L.currentBet === 0 ? `Ставка ${fmt(raiseTo)}` : `Рейз до ${fmt(raiseTo)}`;
+  const raiseWord = raiseTo >= L.maxTo ? `Олл-ин ${fmt(raiseTo)}<small>все фишки</small>` : L.currentBet === 0 ? `Поставить ${fmt(raiseTo)}<small>бет</small>` : `Повысить до ${fmt(raiseTo)}<small>рейз</small>`;
   const callAllIn = L.toCall >= L.stack;
-  const callText = L.canCheck ? 'Чек<small>пропустить</small>'
+  const callText = L.canCheck ? 'Пропустить<small>чек</small>'
     : callAllIn ? `Олл-ин ${fmt(L.toCall)}<small>уравнять всем стеком</small>`
-    : `Колл ${fmt(L.toCall)}<small>уравнять</small>`;
+    : `Уравнять ${fmt(L.toCall)}<small>колл</small>`;
   el.innerHTML = `
     ${L.canRaise ? `<div class="sizes" role="group" aria-label="Размер ставки">
       <button type="button" class="step" data-step="-1" aria-label="Меньше">−</button>
@@ -534,9 +669,9 @@ function renderActions() {
       <button type="button" class="step" data-step="1" aria-label="Больше">+</button>
     </div>` : ''}
     <div class="act-row">
-      <button type="button" class="act fold ${sug === 'fold' ? 'suggested' : ''}" data-act="fold">Фолд<small>сбросить</small></button>
+      <button type="button" class="act fold ${sug === 'fold' ? 'suggested' : ''}" data-act="fold">Сбросить<small>фолд</small></button>
       <button type="button" class="act call ${sug === 'check' || sug === 'call' ? 'suggested' : ''}" data-act="${L.canCheck ? 'check' : 'call'}">${callText}</button>
-      <button type="button" class="act raise ${sug === 'raise' ? 'suggested' : ''}" data-act="raise" ${L.canRaise ? '' : 'disabled'}>${L.canRaise ? raiseWord : 'Рейз'}<small>${L.currentBet === 0 ? 'поставить' : 'повысить'}</small></button>
+      <button type="button" class="act raise ${sug === 'raise' ? 'suggested' : ''}" data-act="raise" ${L.canRaise ? '' : 'disabled'}>${L.canRaise ? raiseWord : 'Повысить<small>рейз</small>'}</button>
     </div>`;
 }
 
@@ -546,49 +681,9 @@ function recordHand() {
   const net = me.stack - ui.handStart;
   stats.hands++;
   stats.net += net;
-  if (net > 0) stats.won++;
+  if (net > 0) { stats.won++; if (game.result.showdown) stats.wonSd++; else stats.wonFold++; }
   store.set('stats', stats);
 }
-
-function showResult() {
-  const r = game.result;
-  if (!r || game.phase !== 'done') return;
-  const me = game.players[0];
-  const net = me.stack - ui.handStart;
-  const total = Object.values(r.winnings).reduce((a, b) => a + b, 0);
-  const winnerIds = Object.keys(r.winnings).map(Number);
-  const names = winnerIds.map((id) => (id === 0 ? 'ты' : game.players[id].name));
-  let title;
-  if (r.winnings[0] && winnerIds.length === 1) title = `Ты выиграл банк ${fmt(total)}`;
-  else if (r.winnings[0]) title = `Ты забираешь ${fmt(r.winnings[0])} из ${fmt(total)}`;
-  else title = `Банк ${fmt(total)} забирает ${names.join(', ')}`;
-  const sub = r.showdown
-    ? `Вскрытие. Итог для тебя: ${net > 0 ? '+' : ''}${fmt(net)}`
-    : `Остальные сбросили карты. Итог для тебя: ${net > 0 ? '+' : ''}${fmt(net)}`;
-
-  let sd = '';
-  if (r.showdown) {
-    const entries = game.players.filter((p) => !p.folded).map((p) => ({ id: p.id, score: r.hands[p.id].score, won: !!r.winnings[p.id] }));
-    sd = `<div class="section-label">Вскрытие: кто с чем</div><ul class="sd-list">${handRows(entries, game.board)}</ul>`;
-  }
-  const folded = game.players.filter((p) => p.id !== 0 && p.folded);
-  const reveal = folded.length && !ui.revealAll
-    ? `<button type="button" class="btn-ghost" id="reveal">Показать карты всех</button>` : '';
-
-  const review = ui.review.length
-    ? `<div class="section-label">Разбор твоих решений</div><ul class="review">${ui.review.map((f) => `
-        <li><span class="rv-head">${gradeChip(f)}${STREET_NAMES[f.street]}: ${esc(f.label.toLowerCase())}</span>
-        <span class="rv-text">${esc(f.text)}</span></li>`).join('')}</ul>`
-    : '<p class="result-sub">В этой раздаче тебе не пришлось принимать решений.</p>';
-
-  const showWhatIf = ui.whatIf && (ui.whatIf.by === 'me' || !r.showdown);
-  const el = $('#result');
-  el.innerHTML = `<div class="result-scroll"><div class="sheet-head"><h2>${esc(title)}</h2></div>
-    <p class="result-sub">${esc(sub)}</p>${sd}${showWhatIf ? whatIfHTML(ui.whatIf) : ''}${review}</div>
-    <div class="result-actions">${reveal}<button type="button" class="btn-primary" id="next-hand">Следующая раздача</button></div>`;
-  el.hidden = false;
-}
-function hideResult() { $('#result').hidden = true; }
 
 /* ---------- Листы ---------- */
 const COMBOS = [
@@ -606,7 +701,7 @@ const COMBOS = [
 
 function renderCombos(focus = null) {
   let currentName = focus;
-  if (!focus && game && current === 'table' && !game.players[0].folded) {
+  if (!focus && game && current === 'table' && game.phase !== 'done' && !game.players[0].folded) {
     const me = game.players[0];
     currentName = shortName(evaluate(me.hole.concat(game.board)));
   }
@@ -642,7 +737,7 @@ function renderStats() {
   body.innerHTML = `
     <div class="stats-grid">
       <div class="stat"><b>${fmt(stats.hands)}</b><span>раздач сыграно</span></div>
-      <div class="stat"><b>${fmt(stats.won)}</b><span>раздач выиграно</span></div>
+      <div class="stat"><b>${fmt(stats.won)}</b><span>раздач выиграно: ${fmt(stats.wonSd)} на вскрытии, ${fmt(stats.wonFold)} без него</span></div>
       <div class="stat"><b>${bb > 0 ? '+' : ''}${fmt(bb)} ББ</b><span>итог в больших блайндах</span></div>
       <div class="stat"><b>${pct(stats.good)}%</b><span>решений совпало с тренером</span></div>
     </div>
@@ -688,12 +783,13 @@ document.addEventListener('click', (e) => {
   if (t.dataset.open) {
     const what = t.dataset.open;
     if (what === 'combos') openSheet('combos');
+    else if (what === 'review') showScreen('review');
     else if (what === 'table-new') { if (game) { showScreen('table'); resume(); } else startTable(); }
     else showScreen(what);
     return;
   }
   if (t.dataset.close) return closeSheet(t.dataset.close);
-  if (t.hasAttribute('data-back')) return showScreen(game && current !== 'stats' && current !== 'rules' ? 'table' : 'home');
+  if (t.hasAttribute('data-back')) return showScreen(game && (current === 'review' || (current !== 'stats' && current !== 'rules')) ? 'table' : 'home');
   if (t.dataset.act) return humanAct(t.dataset.act);
   if (t.dataset.amount) { ui.raiseTo = Number(t.dataset.amount); return renderActions(); }
   if (t.dataset.step) {
@@ -709,6 +805,7 @@ document.addEventListener('click', (e) => {
   }
   switch (t.id) {
     case 'btn-play': return game ? (showScreen('table'), resume()) : startTable();
+    case 'install-btn': installPrompt?.prompt(); return;
     case 'btn-leave': clearTimeout(ui.timer); return showScreen('home');
     case 'btn-log': return openSheet('log');
     case 'why': return openSheet('explain');
@@ -718,9 +815,9 @@ document.addEventListener('click', (e) => {
       renderCoach(); renderActions();
       return openSheet('explain');
     case 'next-hand': return newHand();
-    case 'reveal': ui.revealAll = true; renderSeats(); return showResult();
+    case 'reveal': ui.revealAll = true; renderSeats(); return renderReview();
     case 'reset-stats':
-      Object.assign(stats, { hands: 0, won: 0, net: 0, good: 0, ok: 0, bad: 0, mistakes: [] });
+      Object.assign(stats, { hands: 0, won: 0, wonSd: 0, wonFold: 0, net: 0, good: 0, ok: 0, bad: 0, mistakes: [] });
       store.set('stats', stats);
       return renderStats();
     default:
@@ -731,7 +828,7 @@ $('#opt-4color').addEventListener('change', (e) => { settings.fourColor = e.targ
 $('#opt-combo').addEventListener('change', (e) => { settings.comboBoost = e.target.checked; saveSettings(); });
 
 function resume() {
-  if (game.phase === 'done') { render(); if (ui.resultShown) showResult(); return; }
+  if (game.phase === 'done') { render(); return; }
   loop();
 }
 
