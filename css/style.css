@@ -348,8 +348,17 @@ h1 {
 .result h2 { font-size: 18px; }
 .result-sub { color: var(--muted); margin: 4px 0 12px; font-size: 14px; }
 .sd-list { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.sd-list li { display: flex; align-items: center; gap: 10px; }
+.sd-list li {
+  display: flex; flex-direction: column; gap: 6px; cursor: pointer;
+  padding: 8px 10px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line);
+}
+.sd-list li.won { border-color: rgba(92, 194, 131, 0.5); }
+.sd-list li:focus-visible { outline: 2px solid var(--brass); }
+.sd-top { display: flex; align-items: center; gap: 10px; }
 .sd-list .card { --cw: 28px; }
+.sd-five { display: flex; gap: 4px; }
+.sd-five .card { --cw: 34px; }
+.sd-rule { font-size: 12.5px; color: var(--muted); }
 .sd-cards { display: flex; gap: 3px; }
 .sd-who { flex: 1; min-width: 0; font-size: 14px; }
 .sd-who small { display: block; color: var(--muted); }

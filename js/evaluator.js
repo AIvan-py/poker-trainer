@@ -139,3 +139,39 @@ export function comboCards(cards) {
   const ranks = cat === 1 || cat === 3 || cat === 7 ? [r0] : [r0, r1];
   return cards.filter((c) => ranks.includes(c >> 2));
 }
+
+/** Короткое правило комбинации для новичка. */
+export const RULES = [
+  'ничего не собрано — сравнивают старшие карты',
+  'две карты одного ранга',
+  'две разные пары',
+  'три карты одного ранга',
+  'пять карт подряд, масти любые',
+  'пять карт одной масти',
+  'тройка и пара вместе',
+  'четыре карты одного ранга',
+  'пять карт подряд одной масти',
+  'десятка, валет, дама, король и туз одной масти',
+];
+
+/** Разбор руки: название, правило, лучшие 5 карт, карты самой комбинации. */
+export function explainHand(hole, board) {
+  const all = hole.concat(board);
+  const score = evaluate(all);
+  const cat = category(score);
+  const isRoyal = cat === 8 && ranksOf(score)[0] === 12;
+  const combo = new Set(comboCards(all));
+  // сначала карты комбинации, потом кикеры; внутри — по старшинству
+  const five = (all.length >= 5 ? bestFive(all) : all.slice())
+    .sort((a, b) => (combo.has(b) - combo.has(a)) || ((b >> 2) - (a >> 2)));
+  return {
+    score,
+    cat,
+    name: describe(score),
+    short: isRoyal ? CATEGORY_NAMES[9] : CATEGORY_NAMES[cat],
+    rule: RULES[isRoyal ? 9 : cat],
+    five,
+    combo,
+    fromHand: five.filter((c) => hole.includes(c)),
+  };
+}

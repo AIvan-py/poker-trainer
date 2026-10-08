@@ -5,7 +5,7 @@ import { advise, grade, actionLabel } from './coach.js';
 import { rankOf, suitOf, rankLabel, SUIT_SYMBOLS, SUITS, parseCards, prettyCard } from './cards.js';
 import { analyze, drawText } from './handinfo.js';
 import { handPct, POSITION_INFO } from './preflop.js';
-import { evaluate, shortName, rankName, comboCards, describe } from './evaluator.js';
+import { evaluate, shortName, rankName, comboCards, explainHand } from './evaluator.js';
 import { equityKnown } from './equity.js';
 import { rigForPlayer } from './rig.js';
 
@@ -73,12 +73,13 @@ function showScreen(name) {
   if (name === 'stats') renderStats();
 }
 
-function openSheet(id) {
-  if (id === 'combos') renderCombos();
+function openSheet(id, focus = null) {
+  if (id === 'combos') renderCombos(focus);
   if (id === 'log') renderLog();
   if (id === 'explain' && !renderExplain()) return;
   $(`#${id}`).hidden = false;
   $(`#${id}-backdrop`).hidden = false;
+  if (id === 'combos' && focus) $('#combo-list .current')?.scrollIntoView({ block: 'center' });
 }
 function closeSheet(id) {
   $(`#${id}`).hidden = true;
@@ -208,6 +209,30 @@ function humanAct(type) {
   loop();
 }
 
+/* ---------- Строки вскрытия: кто с чем и из каких карт ---------- */
+/** Строки списка: победители первыми, потом по силе руки. Для каждого — 5 лучших карт с подсветкой комбинации. */
+function handRows(entries, board) {
+  const sorted = [...entries].sort((a, b) => (b.won - a.won) || (b.score - a.score));
+  return sorted.map((x) => {
+    const p = game.players[x.id];
+    const ex = explainHand(p.hole, board);
+    const who = x.id === 0 ? 'Ты' : esc(p.name);
+    const inCombo = ex.fromHand.filter((c) => ex.combo.has(c));
+    const whose = x.id === 0 ? 'твоей руки' : 'руки';
+    const fromHand = inCombo.length ? `В комбинации из ${whose}: ${inCombo.map(prettyCard).join(' ')}`
+      : ex.fromHand.length ? `Из ${whose} в счёт идёт только кикер: ${ex.fromHand.map(prettyCard).join(' ')}`
+        : `Комбинация целиком на столе, ${x.id === 0 ? 'твоя' : ''} рука не участвует`;
+    return `<li class="${x.won ? 'won' : ''}" data-combo="${esc(ex.short)}" role="button" tabindex="0" title="Открыть в справочнике">
+      <div class="sd-top">
+        <span class="sd-cards">${p.hole.map((c) => cardHTML(c, ex.combo.has(c) ? 'combo' : 'dim')).join('')}</span>
+        <span class="sd-who"><b>${who}${x.won ? ' · выиграл' + (x.id !== 0 && isF(x.id) ? 'а' : '') : ''}</b><small>${esc(ex.name)}</small></span>
+      </div>
+      <div class="sd-five">${ex.five.map((c) => cardHTML(c, ex.combo.has(c) ? 'combo' : '')).join('')}</div>
+      <span class="sd-rule">${esc(cap(ex.rule))}. ${esc(fromHand)}.</span>
+    </li>`;
+  }).join('');
+}
+
 /* ---------- Что было бы, если доиграть до конца ---------- */
 function snapshot(by, oppIds, coachEq) {
   const me = game.players[0];
@@ -253,12 +278,7 @@ function whatIfHTML(w) {
     lesson = `Твой шанс против ${f ? 'её' : 'его'} карт в тот момент: ${eq}%.`;
   }
   const coach = w.coachEq !== undefined ? ` Тренер, не видя чужих карт, оценивал ${Math.round(w.coachEq * 100)}%.` : '';
-  const rows = scores.map((x) => {
-    const p = game.players[x.id];
-    const won = winners.includes(x.id) ? 'won' : '';
-    return `<li class="${won}"><span class="sd-cards">${p.hole.map((c) => cardHTML(c)).join('')}</span>
-      <span class="sd-who"><b>${x.id === 0 ? 'Ты' : esc(p.name)}</b><small>${esc(describe(x.score))}</small></span></li>`;
-  }).join('');
+  const rows = handRows(scores.map((x) => ({ ...x, won: winners.includes(x.id) })), w.runout);
   const myCombo = new Set(comboCards(me.hole.concat(w.runout)));
   return `<div class="section-label">Что было бы, если доиграть до конца</div>
     <p class="whatif-head">${esc(head)}</p>
@@ -413,7 +433,8 @@ function renderHero() {
   } else {
     const a = analyze(me.hole, game.board);
     name = a.name;
-    extra = drawText(a);
+    const ex = explainHand(me.hole, game.board);
+    extra = [ex.cat > 0 ? ex.rule : '', drawText(a)].filter(Boolean).join(' · ');
   }
   const pos = game.position(0);
   $('#hero').innerHTML = `
@@ -547,13 +568,8 @@ function showResult() {
 
   let sd = '';
   if (r.showdown) {
-    const rows = game.players.filter((p) => !p.folded).map((p) => {
-      const h = r.hands[p.id];
-      const won = r.winnings[p.id] ? 'won' : '';
-      return `<li class="${won}"><span class="sd-cards">${p.hole.map((c) => cardHTML(c)).join('')}</span>
-        <span class="sd-who"><b>${esc(p.id === 0 ? 'Ты' : p.name)}</b><small>${esc(h.name)}</small></span></li>`;
-    });
-    sd = `<ul class="sd-list">${rows.join('')}</ul>`;
+    const entries = game.players.filter((p) => !p.folded).map((p) => ({ id: p.id, score: r.hands[p.id].score, won: !!r.winnings[p.id] }));
+    sd = `<div class="section-label">Вскрытие: кто с чем</div><ul class="sd-list">${handRows(entries, game.board)}</ul>`;
   }
   const folded = game.players.filter((p) => p.id !== 0 && p.folded);
   const reveal = folded.length && !ui.revealAll
@@ -588,15 +604,15 @@ const COMBOS = [
   ['Старшая карта', 'As Jd 8c 5h 3s', 'Ничего не собрано. Сравнивают старшие карты по очереди.', '17,4%'],
 ];
 
-function renderCombos() {
-  let currentName = null;
-  if (game && current === 'table' && !game.players[0].folded) {
+function renderCombos(focus = null) {
+  let currentName = focus;
+  if (!focus && game && current === 'table' && !game.players[0].folded) {
     const me = game.players[0];
     currentName = shortName(evaluate(me.hole.concat(game.board)));
   }
   $('#combo-list').innerHTML = COMBOS.map(([name, cards, desc, freq]) => `
     <li class="${name === currentName ? 'current' : ''}">
-      <span class="combo-name">${name}${name === currentName ? '<small>у тебя сейчас</small>' : ''}</span>
+      <span class="combo-name">${name}${name === currentName ? `<small>${focus ? 'эта' : 'у тебя сейчас'}</small>` : ''}</span>
       <span class="combo-freq">${freq}</span>
       <span class="combo-cards">${parseCards(cards).map((c) => cardHTML(c)).join('')}</span>
       <span class="combo-desc">${desc}</span>
@@ -655,8 +671,9 @@ function toast(text) {
 
 /* ---------- События ---------- */
 document.addEventListener('click', (e) => {
-  const t = e.target.closest('button, [data-seat]');
+  const t = e.target.closest('button, [data-seat], [data-combo]');
   if (!t) return;
+  if (t.dataset.combo) return openSheet('combos', t.dataset.combo);
 
   const seg = t.closest('.seg');
   if (seg) {
