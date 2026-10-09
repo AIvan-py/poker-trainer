@@ -1,6 +1,6 @@
 // Оценка руки из 1–7 карт. Чем больше число, тем сильнее рука.
 // score = категория * 16^5 + старшинство до пяти рангов.
-import { SUIT_SYMBOLS } from './cards.js';
+import { SUIT_SYMBOLS, rankLabel } from './cards.js';
 
 const BASE = 16 ** 5;
 
@@ -204,8 +204,10 @@ export function handGroups(hole, board) {
     case 8: {
       let seq = five.slice().sort((a, b) => (a >> 2) - (b >> 2));
       if (r[0] === 3) { const ace = seq.find((c) => (c >> 2) === 12); seq = [ace, ...seq.filter((c) => c !== ace)]; }
-      const label = cat === 8 ? (r[0] === 12 ? 'от десятки до туза, одна масть' : 'подряд и одной масти') : 'пять подряд';
-      return [{ label, cards: seq, main: true }];
+      const order = seq.map((c) => rankLabel(c >> 2)).join(' → ');
+      const note = r[0] === 3 ? 'Это «колесо»: туз здесь считается за единицу и стоит перед двойкой' : '';
+      const label = cat === 8 ? `подряд и одной масти: ${order}` : `подряд: ${order}`;
+      return [{ label, cards: seq, main: true, note }];
     }
     case 5: return [{ label: `все ${SUIT_SYMBOLS[five[0] & 3]}`, cards: five.slice().sort(byRankDesc), main: true }];
     case 6: { const t = ofRank(r[0]), p = ofRank(r[1]); return [{ label: 'тройка', cards: t, main: true }, { label: 'пара', cards: p, main: true }]; }
