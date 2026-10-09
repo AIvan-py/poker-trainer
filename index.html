@@ -69,7 +69,7 @@
         </div>
         <label class="toggle" for="opt-combo">
           <input type="checkbox" id="opt-combo">
-          <span>Чаще собирать комбинации <small>иногда раздача подкручивается, чтобы ты чаще видел флеши, стриты и фулл-хаусы и запоминал их</small></span>
+          <span>Чаще собирать комбинации <small>примерно каждая вторая раздача подкручивается так, чтобы у всех за столом чаще были флеши, стриты и фулл-хаусы. Проценты в такой игре не настоящие</small></span>
         </label>
         <label class="toggle" for="opt-4color">
           <input type="checkbox" id="opt-4color">
@@ -77,7 +77,13 @@
         </label>
       </div>
 
-      <button type="button" class="btn-primary" id="btn-play">Сесть за стол</button>
+      <div class="home-actions">
+        <button type="button" class="btn-primary" id="btn-play">Сесть за стол</button>
+        <button type="button" class="btn-train" id="btn-train">
+          <b>Тренировка комбинаций</b>
+          <span>Карты всех открыты, у большинства что-то собрано. Угадай, у кого лучшая рука, и смотри разбор.</span>
+        </button>
+      </div>
 
       <div class="install" id="install" hidden></div>
 
@@ -112,6 +118,17 @@
     <div class="coach" id="coach" aria-live="polite"></div>
     <div class="actions" id="actions"></div>
 
+  </section>
+
+  <!-- Тренировка комбинаций -->
+  <section class="screen page train" id="screen-train" hidden>
+    <header class="page-head">
+      <button type="button" class="icon-btn" data-back aria-label="В меню">‹</button>
+      <h2>Тренировка</h2>
+      <span class="train-score" id="train-score"></span>
+      <button type="button" class="pill-btn" data-open="combos">Комбинации</button>
+    </header>
+    <div class="page-body" id="train-body"></div>
   </section>
 
   <!-- Разбор раздачи -->

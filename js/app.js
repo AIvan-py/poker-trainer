@@ -7,7 +7,7 @@ import { analyze, drawText } from './handinfo.js';
 import { handPct, POSITION_INFO } from './preflop.js';
 import { evaluate, shortName, rankName, comboCards, explainHand, handGroups, whyBeats } from './evaluator.js';
 import { equity, equityKnown } from './equity.js';
-import { rigForPlayer } from './rig.js';
+import { rigTable, dealTrainingSet } from './rig.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -26,11 +26,11 @@ const store = {
 };
 
 const BOTS = [
-  { name: 'Борис', style: 'fish', color: '#5aa9c9' },
-  { name: 'Лена', style: 'pro', color: '#c9a35b', f: true },
-  { name: 'Гоша', style: 'maniac', color: '#e0664d' },
-  { name: 'Нина', style: 'rock', color: '#a3aab0', f: true },
-  { name: 'Петя', style: 'student', color: '#93c463' },
+  { name: 'Борис', gen: 'Бориса', style: 'fish', color: '#5aa9c9' },
+  { name: 'Лена', gen: 'Лены', style: 'pro', color: '#c9a35b', f: true },
+  { name: 'Гоша', gen: 'Гоши', style: 'maniac', color: '#e0664d' },
+  { name: 'Нина', gen: 'Нины', style: 'rock', color: '#a3aab0', f: true },
+  { name: 'Петя', gen: 'Пети', style: 'student', color: '#93c463' },
 ];
 const OPP_HINT = {
   1: 'Один на один с Борисом. Он любит уравнивать — хороший соперник для старта.',
@@ -46,7 +46,7 @@ const LAYOUTS = {
 
 const settings = Object.assign({ opponents: 3, coachMode: 'percent', tableMode: 'showdown', speed: 'normal', fourColor: false, comboBoost: false }, store.get('settings', {}));
 if (settings.hintMode) { settings.coachMode = 'advice'; delete settings.hintMode; }
-const stats = Object.assign({ hands: 0, won: 0, wonSd: 0, wonFold: 0, net: 0, good: 0, ok: 0, bad: 0, mistakes: [] }, store.get('stats', {}));
+const stats = Object.assign({ hands: 0, won: 0, wonSd: 0, wonFold: 0, net: 0, good: 0, ok: 0, bad: 0, mistakes: [], tq: 0, tr: 0 }, store.get('stats', {}));
 const MODE_HINT = {
   showdown: 'Боты не сбрасывают и не повышают — только уравнивают. Каждая раздача доходит до вскрытия, колода честная. Так видно по правде, как часто слабые карты проигрывают.',
   normal: 'Боты играют по своему характеру: сбрасывают, блефуют, повышают. Банк часто уходит без вскрытия.',
@@ -59,6 +59,7 @@ const COACH_HINT = {
 
 let game = null;
 let meta = [];
+let train = null; // тренировка комбинаций: { players, board, winners, picked }
 const ui = {
   advice: null, open: false, asked: false, feedback: null, review: [],
   raiseTo: 0, timer: null, dealtBoard: 0, newDeal: false, revealAll: false,
@@ -81,7 +82,8 @@ function showScreen(name) {
   for (const el of $$('.screen')) el.hidden = el.id !== `screen-${name}`;
   if (name === 'home') renderHome();
   if (name === 'stats') renderStats();
-  if (name === 'review') { renderReview(); window.scrollTo(0, 0); $('#screen-review').scrollTop = 0; }
+  if (name === 'review') { if (train?.active) renderTrainReview(); else renderReview(); window.scrollTo(0, 0); $('#screen-review').scrollTop = 0; }
+  if (name === 'train') { renderTrain(); $('#screen-train').scrollTop = 0; }
 }
 
 function openSheet(id, focus = null) {
@@ -143,11 +145,84 @@ function saveSettings() {
 }
 
 /* ---------- Стол ---------- */
+function tableBots() {
+  return settings.opponents === 1 ? [BOTS[0]] : settings.opponents === 3 ? BOTS.slice(0, 3) : BOTS;
+}
+
+/* ---------- Тренировка комбинаций ---------- */
+function startTraining() {
+  const bots = tableBots();
+  meta = [{ color: '#ebe7db' }, ...bots];
+  train = { active: true, players: [{ name: 'Ты' }, ...bots.map((b) => ({ name: b.name }))], board: [], winners: [], picked: null, no: 0 };
+  nextTraining();
+}
+
+function nextTraining() {
+  const { board, holes } = dealTrainingSet(train.players.length, Math.random);
+  train.players.forEach((p, i) => { p.hole = holes[i]; });
+  train.board = board;
+  const scores = train.players.map((p) => evaluate(p.hole.concat(board)));
+  const best = Math.max(...scores);
+  train.winners = scores.map((sc, i) => (sc === best ? i : -1)).filter((i) => i >= 0);
+  train.scores = scores;
+  train.picked = null;
+  train.no++;
+  showScreen('train');
+}
+
+function renderTrain() {
+  if (!train) return;
+  $('#train-score').textContent = stats.tq ? `верно ${stats.tr} из ${stats.tq}` : '';
+  const order = train.players.map((_, i) => i);
+  $('#train-body').innerHTML = `
+    <div><div class="section-label">На столе</div><div class="rv-board">${train.board.map((c) => cardHTML(c)).join('')}</div></div>
+    <p class="tq-prompt">У кого лучшая рука? Нажми на игрока.</p>
+    <div class="tq-list">${order.map((i) => {
+      const p = train.players[i];
+      return `<button type="button" class="tq" data-pick="${i}">
+        <span class="avatar" style="--c:${meta[i].color}">${i === 0 ? 'Я' : esc(p.name[0])}</span>
+        <b>${esc(p.name)}</b>
+        <span class="tq-cards">${p.hole.map((c) => cardHTML(c)).join('')}</span>
+      </button>`;
+    }).join('')}</div>
+    <p class="tq-hint">Каждый собирает лучшие 5 карт из своих 2 и 5 на столе. Подсказка: справочник комбинаций — по кнопке на главном экране.</p>`;
+}
+
+function pickTrain(i) {
+  if (!train || train.picked !== null) return;
+  train.picked = i;
+  stats.tq++;
+  if (train.winners.includes(i)) stats.tr++;
+  store.set('stats', stats);
+  showScreen('review');
+}
+
+function renderTrainReview() {
+  const right = train.winners.includes(train.picked);
+  const entries = train.players.map((p, i) => ({ id: i, score: train.scores[i], won: train.winners.includes(i) }));
+  const w = train.winners[0];
+  const wEx = explainHand(train.players[w].hole, train.board);
+  const pEx = explainHand(train.players[train.picked].hole, train.board);
+  const wName = train.winners.map((i) => (i === 0 ? 'тебя' : meta[i].gen)).join(' и ');
+  const verdict = right
+    ? `<div class="verdict right">Верно! ${train.winners.length > 1 ? 'Ничья: одинаковые руки' : `Лучшая рука у ${esc(wName)}: ${esc(wEx.name.toLowerCase())}`}</div>`
+    : `<div class="verdict wrong">Не угадал. Лучшая рука у ${esc(wName)}: ${esc(wEx.name.toLowerCase())}
+        <small>${esc(train.picked === 0 ? 'У тебя' : `У ${meta[train.picked].gen}`)}: ${esc(pEx.name.toLowerCase())}. ${esc(whyBeats(wEx, pEx))}.</small></div>`;
+  $('#review-title').textContent = `Тренировка · ${train.no}`;
+  $('#review-body').innerHTML = `${verdict}
+    <div><div class="section-label">На столе</div><div class="rv-board">${train.board.map((c) => cardHTML(c)).join('')}</div></div>
+    <div><div class="section-label">Кто с чем</div>
+      <p class="rv-note" style="margin-bottom:10px"><span class="legend-mine"><i></i> карты из руки игрока · зелёная рамка — сама комбинация</span></p>
+      <div class="pb-list">${playerBlocks(entries, train.board, train.players)}</div></div>`;
+  $('#screen-review .review-bar .btn-primary').textContent = 'Дальше';
+}
+
 function startTable() {
-  const bots = settings.opponents === 1 ? [BOTS[0]] : settings.opponents === 3 ? BOTS.slice(0, 3) : BOTS;
+  const bots = tableBots();
+  if (train) train.active = false;
   game = new Game({ players: [{ name: 'Ты', isHuman: true }, ...bots.map((b) => ({ name: b.name, style: b.style }))] });
   meta = [{ color: '#ebe7db' }, ...bots];
-  game.onDeal = (g) => settings.comboBoost && Math.random() < 0.4 && rigForPlayer(g, 0, Math.random);
+  game.onDeal = (g) => settings.comboBoost && Math.random() < 0.5 && rigTable(g, Math.random);
   showScreen('table');
   newHand();
 }
@@ -257,12 +332,12 @@ function humanAct(type) {
 
 /* ---------- Карточки игроков в разборе: комбинация по группам ---------- */
 /** Победители первыми, потом по силе руки. Каждому — его карты, комбинация по группам и почему она слабее лучшей. */
-function playerBlocks(entries, board) {
+function playerBlocks(entries, board, players = game.players) {
   const sorted = [...entries].sort((a, b) => (b.won - a.won) || (b.score - a.score));
-  const best = explainHand(game.players[sorted[0].id].hole, board);
+  const best = explainHand(players[sorted[0].id].hole, board);
   const tie = sorted.filter((x) => x.won).length > 1;
   return sorted.map((x) => {
-    const p = game.players[x.id];
+    const p = players[x.id];
     const ex = explainHand(p.hole, board);
     const groups = handGroups(p.hole, board);
     const mine = new Set(p.hole);
@@ -405,6 +480,7 @@ function renderReview() {
       : '<p class="rv-note">В этой раздаче тебе не пришлось принимать решений.</p>';
   }
   $('#review-title').textContent = `Раздача ${game.handNo}`;
+  $('#screen-review .review-bar .btn-primary').textContent = 'Следующая раздача';
   $('#review-body').innerHTML = `<div><h2 class="rv-title">${esc(title)}</h2><p class="rv-sub">${esc(sub)}</p></div>${body}`;
 }
 
@@ -731,7 +807,7 @@ function renderStats() {
   const pct = (x) => (total ? Math.round((x / total) * 100) : 0);
   const bb = Math.round(stats.net / 20);
   const body = $('#stats-body');
-  if (!stats.hands) {
+  if (!stats.hands && !stats.tq) {
     body.innerHTML = '<p class="empty-note">Здесь появится статистика после первых раздач: сколько ты выиграл, насколько точны твои решения и какие ошибки повторяются.</p><button type="button" class="btn-primary" data-open="table-new">Сыграть первую раздачу</button>';
     return;
   }
@@ -741,6 +817,7 @@ function renderStats() {
       <div class="stat"><b>${fmt(stats.won)}</b><span>раздач выиграно: ${fmt(stats.wonSd)} на вскрытии, ${fmt(stats.wonFold)} без него</span></div>
       <div class="stat"><b>${bb > 0 ? '+' : ''}${fmt(bb)} ББ</b><span>итог в больших блайндах</span></div>
       <div class="stat"><b>${pct(stats.good)}%</b><span>решений совпало с тренером</span></div>
+      <div class="stat"><b>${stats.tq ? Math.round((stats.tr / stats.tq) * 100) : 0}%</b><span>тренировка: верно ${fmt(stats.tr)} из ${fmt(stats.tq)}</span></div>
     </div>
     <div class="section-label">Качество решений · ${fmt(total)}</div>
     <div class="bar" role="img" aria-label="Хорошо ${pct(stats.good)}%, допустимо ${pct(stats.ok)}%, ошибки ${pct(stats.bad)}%">
@@ -770,6 +847,7 @@ document.addEventListener('click', (e) => {
   const t = e.target.closest('button, [data-seat], [data-combo]');
   if (!t) return;
   if (t.dataset.combo) return openSheet('combos', t.dataset.combo);
+  if (t.dataset.pick !== undefined) return pickTrain(Number(t.dataset.pick));
 
   const seg = t.closest('.seg');
   if (seg) {
@@ -790,7 +868,11 @@ document.addEventListener('click', (e) => {
     return;
   }
   if (t.dataset.close) return closeSheet(t.dataset.close);
-  if (t.hasAttribute('data-back')) return showScreen(game && (current === 'review' || (current !== 'stats' && current !== 'rules')) ? 'table' : 'home');
+  if (t.hasAttribute('data-back')) {
+    if (current === 'train') { train.active = false; return showScreen('home'); }
+    if (current === 'review' && train?.active) return showScreen('train');
+    return showScreen(game && (current === 'review' || (current !== 'stats' && current !== 'rules')) ? 'table' : 'home');
+  }
   if (t.dataset.act) return humanAct(t.dataset.act);
   if (t.dataset.amount) { ui.raiseTo = Number(t.dataset.amount); return renderActions(); }
   if (t.dataset.step) {
@@ -805,7 +887,7 @@ document.addEventListener('click', (e) => {
     return toast(`${game.players[i].name} — ${st.label.toLowerCase()}: ${st.desc}.`);
   }
   switch (t.id) {
-    case 'btn-play': return game ? (showScreen('table'), resume()) : startTable();
+    case 'btn-play': if (train) train.active = false; return game ? (showScreen('table'), resume()) : startTable();
     case 'install-btn': installPrompt?.prompt(); return;
     case 'btn-leave': clearTimeout(ui.timer); return showScreen('home');
     case 'btn-log': return openSheet('log');
@@ -815,10 +897,11 @@ document.addEventListener('click', (e) => {
       if (ui.advice?.type === 'raise') ui.raiseTo = ui.advice.amount;
       renderCoach(); renderActions();
       return openSheet('explain');
-    case 'next-hand': return newHand();
+    case 'next-hand': return train?.active ? nextTraining() : newHand();
+    case 'btn-train': return startTraining();
     case 'reveal': ui.revealAll = true; renderSeats(); return renderReview();
     case 'reset-stats':
-      Object.assign(stats, { hands: 0, won: 0, wonSd: 0, wonFold: 0, net: 0, good: 0, ok: 0, bad: 0, mistakes: [] });
+      Object.assign(stats, { hands: 0, won: 0, wonSd: 0, wonFold: 0, net: 0, good: 0, ok: 0, bad: 0, mistakes: [], tq: 0, tr: 0 });
       store.set('stats', stats);
       return renderStats();
     default:

@@ -90,26 +90,34 @@ test('тренер даёт совет и оценивает ход', () => {
   assert.equal(gr.grade, 'good');
 });
 
-import { rigForPlayer } from '../js/rig.js';
+import { rigTable, dealTrainingSet } from '../js/rig.js';
 import { evaluate, category } from '../js/evaluator.js';
 import { equityKnown } from '../js/equity.js';
 
-test('подкрутка: колода целая, комбинация собирается к риверу', () => {
+test('подкрутка стола: колода целая, борд совпадает с задуманным', () => {
   const rng = makeRng(7);
-  for (let h = 0; h < 300; h++) {
+  for (let h = 0; h < 200; h++) {
     const g = new Game({ players: [{ name: 'Ты', isHuman: true }, { name: 'A' }, { name: 'B' }, { name: 'C' }], rng });
-    g.onDeal = (gm) => rigForPlayer(gm, 0, rng);
+    g.onDeal = (gm) => rigTable(gm, rng);
     g.startHand();
-    assert.ok(g.rigged);
     const all = [...g.deck, ...g.players.flatMap((p) => p.hole)];
     assert.equal(new Set(all).size, 52);
     const board = g.runoutBoard();
-    assert.ok(category(evaluate(g.players[0].hole.concat(board))) >= 2);
-    // доска «что было бы» совпадает с реальной раздачей до конца
     while (g.phase === 'betting') g.act(g.toAct, { type: 'call' });
     while (g.phase === 'runout') g.runoutStep();
     assert.deepEqual(g.board, board);
   }
+});
+
+test('тренировочная раздача: у большинства комбинация с участием руки', () => {
+  const rng = makeRng(3);
+  let withCombo = 0, total = 0;
+  for (let h = 0; h < 200; h++) {
+    const { board, holes } = dealTrainingSet(4, rng);
+    assert.equal(new Set([...board, ...holes.flat()]).size, 13);
+    for (const hole of holes) { total++; if (category(evaluate(hole.concat(board))) > category(evaluate(board))) withCombo++; }
+  }
+  assert.ok(withCombo / total > 0.8, `комбинаций слишком мало: ${withCombo}/${total}`);
 });
 
 test('эквити с известными картами', () => {

@@ -1,5 +1,5 @@
 // Офлайн-кэш: приложение открывается без интернета после первого запуска.
-const CACHE = 'kt-v3';
+const CACHE = 'kt-v4';
 const ASSETS = [
   './', 'index.html', 'css/style.css', 'manifest.webmanifest',
   'js/app.js', 'js/engine.js', 'js/ai.js', 'js/coach.js', 'js/equity.js',

@@ -472,3 +472,31 @@ h1 {
 .install b { font-size: 15px; }
 .install span { color: var(--muted); font-size: 13.5px; }
 .install .btn-ghost { margin-top: 6px; min-height: 46px; }
+
+/* ---------- Тренировка комбинаций ---------- */
+.home-actions { display: flex; flex-direction: column; gap: 10px; }
+.btn-train {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left;
+  padding: 14px 16px; border-radius: 14px; border: 1px solid var(--brass-soft); background: var(--panel);
+}
+.btn-train b { font-size: 16px; }
+.btn-train span { color: var(--muted); font-size: 13px; }
+.btn-train:active { transform: translateY(1px); }
+.train-score { margin-left: auto; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.train .page-body { gap: 16px; }
+.tq-prompt { margin: 0; font: 700 18px/1.25 var(--f-display); text-wrap: balance; }
+.tq-list { display: flex; flex-direction: column; gap: 8px; }
+.tq {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  padding: 10px 12px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel);
+}
+.tq:active { transform: translateY(1px); border-color: var(--brass); }
+.tq .avatar { width: 30px; height: 30px; font-size: 13px; }
+.tq b { flex: 1; font-size: 15px; }
+.tq .tq-cards { display: flex; gap: 4px; }
+.tq .card { --cw: 44px; }
+.tq-hint { margin: 0; color: var(--muted); font-size: 13px; }
+.verdict { padding: 12px 14px; border-radius: 14px; font-weight: 700; font-size: 16px; }
+.verdict.right { background: rgba(92, 194, 131, 0.16); color: var(--good); border: 1px solid rgba(92, 194, 131, 0.5); }
+.verdict.wrong { background: rgba(232, 99, 79, 0.14); color: var(--bad); border: 1px solid rgba(232, 99, 79, 0.5); }
+.verdict small { display: block; font-weight: 400; color: var(--text); margin-top: 4px; font-size: 14px; }
