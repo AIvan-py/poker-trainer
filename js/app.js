@@ -260,6 +260,7 @@ function humanAct(type) {
 function playerBlocks(entries, board) {
   const sorted = [...entries].sort((a, b) => (b.won - a.won) || (b.score - a.score));
   const best = explainHand(game.players[sorted[0].id].hole, board);
+  const tie = sorted.filter((x) => x.won).length > 1;
   return sorted.map((x) => {
     const p = game.players[x.id];
     const ex = explainHand(p.hole, board);
@@ -271,18 +272,18 @@ function playerBlocks(entries, board) {
     const fromHand = inCombo.length ? `в комбинации из ${whose}: ${inCombo.map(prettyCard).join(' ')}`
       : ex.fromHand.length ? `из ${whose} в счёт идёт только кикер ${ex.fromHand.map(prettyCard).join(' ')}`
         : `комбинация целиком на столе, ${x.id === 0 ? 'твоя' : ''} рука не участвует`;
-    const why = x.won ? (x.id === 0 ? 'Лучшая рука за столом' : `Лучшая рука за столом`) : whyBeats(best, ex);
+    const why = x.won ? (tie ? 'Руки одинаковые — банк делится поровну' : 'Лучшая рука за столом') : whyBeats(best, ex);
     return `<article class="pb ${x.won ? 'won' : ''}" data-combo="${esc(ex.short)}" role="button" tabindex="0" title="Открыть в справочнике">
       <div class="pb-head">
         <span class="avatar" style="--c:${meta[x.id].color}">${x.id === 0 ? 'Я' : esc(p.name[0])}</span>
-        <span class="pb-who"><b>${who}${x.won ? ' · выиграл' + (x.id !== 0 && isF(x.id) ? 'а' : '') : ''}</b><small>${x.id === 0 ? 'твои карты' : 'карты'} →</small></span>
+        <span class="pb-who"><b>${who}${x.won ? (tie ? ' · ничья' : ' · выиграл' + (x.id !== 0 && isF(x.id) ? 'а' : '')) : ''}</b><small>${x.id === 0 ? 'твои карты' : 'карты'} →</small></span>
         <span class="pb-hole">${p.hole.map((c) => cardHTML(c, 'mine')).join('')}</span>
       </div>
       <div class="pb-hand">${esc(ex.name)}</div>
       <div class="groups">${groups.map((g) => `<div class="grp ${g.main ? 'main' : ''}">
         <div class="grp-cards">${g.cards.map((c) => cardHTML(c, mine.has(c) ? 'mine' : '')).join('')}</div>
         <span class="grp-label">${esc(g.label)}</span></div>`).join('')}</div>
-      <p class="pb-rule">${esc(cap(ex.rule))}; ${esc(fromHand)}.</p>
+      <p class="pb-rule">${esc(cap(ex.rule))}; ${esc(fromHand)}.${groups.some((g) => g.note) ? ` ${esc(groups.find((g) => g.note).note)}.` : ''}</p>
       <p class="pb-why">${esc(why)}</p>
     </article>`;
   }).join('');
@@ -366,7 +367,7 @@ function renderReview() {
   const names = winnerIds.map((id) => (id === 0 ? 'ты' : game.players[id].name));
   let title;
   if (r.winnings[0] && winnerIds.length === 1) title = `Ты выиграл банк ${fmt(total)}`;
-  else if (r.winnings[0]) title = `Ты забираешь ${fmt(r.winnings[0])} из ${fmt(total)}`;
+  else if (r.winnings[0]) title = `Ничья: банк ${fmt(total)} делится, тебе ${fmt(r.winnings[0])}`;
   else title = `Банк ${fmt(total)} забирает ${names.join(', ')}`;
   const netText = `${net > 0 ? '+' : ''}${fmt(net)}`;
   const sub = r.showdown
